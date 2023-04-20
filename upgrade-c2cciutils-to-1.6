@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 
 import multi_repo_automation as mra
 import ruamel.yaml.comments
@@ -20,6 +21,31 @@ def _prototype() -> None:
         with mra.EditYAML("ci/config.yaml") as config:
             if "checks" in config:
                 del config["checks"]
+
+    if os.path.exists("Dockerfile"):
+        if not os.path.exists("ci/dpkg-versions.yaml"):
+            with mra.EditYaml("ci/dpkg-versions.yaml") as edit:
+                edit.data = "{}"
+
+        if os.path.exists(".github/renovate.json5"):
+            with mra.Edit(".github/renovate.json5") as renovate_config:
+                renovate_config.data = re.sub(
+                    r"^ci/dpkg-versions.yaml$",
+                    r"^ci/dpkg-versions\\.yaml$",
+                    renovate_config.data,
+                )
+            with mra.EditRenovateConfig() as renovate_config:
+                renovate_config.add_package_rule(
+                    {
+                        "fileMatch": [r"^ci/dpkg-versions\\.yaml$"],
+                        "matchStrings": [
+                            r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"
+                        ],
+                        "datasourceTemplate": "repology",
+                        "versioningTemplate": "loose",
+                    },
+                    r"^ci/dpkg-versions\\.yaml$",
+                )
 
 
 def _do() -> None:
@@ -42,6 +68,15 @@ def _do() -> None:
             "--color=6622BB",
             "--description=A pull request is welcome to fix this issue",
         )
+
+    for workflow_file in mra.run(
+        ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
+    ).stdout.split("\n"):
+        if workflow_file:
+            with mra.EditYAML(workflow_file) as yaml:
+                for job in yaml["jobs"].values():
+                    if job.get("runs-on", "").startswith("ubuntu-"):
+                        job["runs-on"] = "ubuntu-22.04"
 
     gopass = "no-gopass" not in repo.get("types", [])
     token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
@@ -165,7 +200,7 @@ def _do() -> None:
                         step["uses"] = "actions/checkout@v3"
                     if step.get("run", "") == "c2cciutils-checks":
                         if not gopass:
-                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
+                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
                     if "c2cciutils-publish" in step.get("run", ""):
                         if not gopass:
                             step.setdefault("env", {}).update(
@@ -174,18 +209,91 @@ def _do() -> None:
 
     if os.path.exists(".github/workflows/main.yaml"):
         with mra.EditYAML(".github/workflows/main.yaml") as yaml:
+            env = yaml.setdefault("env", {})
+            if "HAS_SECRETS" not in env:
+                env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
+
+                if hasattr(env, "ca"):
+                    env.ca.items.clear()
+                    env.ca.items["HAS_SECRETS"] = [
+                        None,
+                        None,
+                        ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                        None,
+                    ]
+
             for job in yaml["jobs"].values():
-                for step in job["steps"]:
+                has_pip_login = False
+                has_docker_login = False
+                publish_index = -1
+
+                for index, step in enumerate(job["steps"]):
                     if step.get("uses", "").startswith("actions/checkout"):
                         step["uses"] = "actions/checkout@v3"
                     if step.get("run", "") == "c2cciutils-checks":
                         if not gopass:
-                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
+                            env = step.setdefault("env", {})
+                            env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+
+                    if "docker login" in step.get("run", ""):
+                        has_docker_login = True
+                    if ".pypirc" in step.get("run", ""):
+                        has_pip_login = True
+                        if step.get("name", "") == "Init pypi":
+                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                                """echo "[pypi]" > ~/.pypirc
+echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+                            )
+
                     if "c2cciutils-publish" in step.get("run", ""):
+                        publish_index = index
                         if not gopass:
                             step.setdefault("env", {}).update(
                                 {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
                             )
+
+                if (
+                    not has_pip_login
+                    and not gopass
+                    and os.path.exists("pyproject.toml")
+                    and "no-pypi" not in repo.get("type", [])
+                    and publish_index >= 0
+                ):
+                    with mra.EditTOML("pyproject.toml") as pyproject:
+                        is_python = "project" in pyproject.data or "build-system" in pyproject.data
+
+                    if is_python:
+                        job["steps"] = (
+                            job["steps"][:publish_index]
+                            + [
+                                {
+                                    "name": "Init pypi",
+                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
+                                        """echo "[pypi]" > ~/.pypirc
+echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+                                    ),
+                                }
+                            ]
+                            + job["steps"][publish_index:]
+                        )
+                if (
+                    not has_docker_login
+                    and not gopass
+                    and os.path.exists("Dockerfile")
+                    and "no-docker" not in repo.get("type", [])
+                    and publish_index >= 0
+                ):
+                    job["steps"] = (
+                        job["steps"][:publish_index]
+                        + [
+                            {
+                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
+                            }
+                        ]
+                        + job["steps"][publish_index:]
+                    )
 
     if os.path.exists(".github/renovate.json5"):
         with mra.Edit(".github/renovate.json5") as renovate_config:
@@ -215,7 +323,7 @@ def _do() -> None:
                     if len(requirement) == 1:
                         version = requirement[0].split("==")[1]
                         version_split = version.split(".")
-                        version_minor = ".".join(version_minor[:2]) if len(version_split) > 2 else version
+                        version_minor = ".".join(version_split[:2]) if len(version_split) > 2 else version
 
             data = [
                 "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
@@ -241,14 +349,14 @@ def _do() -> None:
     if os.path.exists(".github/renovate.json5"):
         with mra.EditRenovateConfig() as renovate_config:
             renovate_config.add_regex_manager(
-                """
-                fileMatch: ['^ci/config\\\\.yaml$'],
-                matchStrings: [
-                '.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',
-                ],
-                datasourceTemplate: 'github-tags',
-                """,
-                "https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)",
+                {
+                    "fileMatch": ["^ci/config\\\\.yaml$"],
+                    "matchStrings": [
+                        r".*https://raw\\.githubusercontent\\.com/(?<depName>[^\\s]+)/(?<currentValue>[0-9\\.]+)/.*",
+                    ],
+                    "datasourceTemplate": "github-tags",
+                },
+                r"https://raw\\.githubusercontent\\.com/(?<depName>[^\\s]+)/(?<currentValue>[0-9\\.]+)",
             )
 
 
@@ -265,4 +373,5 @@ if __name__ == "__main__":
             "pull_request_title": "Update to c2cciutils version 1.6",
             "pull_request_body": "This is done by the automated script named " + __file__,
         },
+        description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
     )

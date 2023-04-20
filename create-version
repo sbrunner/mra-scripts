@@ -3,7 +3,6 @@
 import json
 import os
 import re
-from email.policy import default
 
 import multi_repo_automation as mra
 import ruamel.yaml.comments
@@ -79,7 +78,7 @@ def _do() -> None:
 
 def add_arguments(args_parser):
     args_parser = args_parser.add_argument_group(
-        "new-version", "Create a new version with a stabilisation branch"
+        "new-version", "Create a new version with a stabilization branch"
     )
     args_parser.add_argument(
         "--version",
@@ -106,7 +105,7 @@ if __name__ == "__main__":
         # pull_request_branch_prefix
         config={
             "branch": "new-version",
-            "pull_request_title": "Add a new stabilisation version",
+            "pull_request_title": "Add a new stabilization version",
             "pull_request_body": "This is done by the automated script named " + __file__,
         },
         add_arguments=add_arguments,
