@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import re
+
+import multi_repo_automation as mra
+import ruamel.yaml.comments
+
+# if os.path.exists(".github/renovate.json5"):
+# if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
+# if mra.git_grep(r"\<text\>"]): # found
+# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
+# mra.edit("file")
+# input()
+
+
+def _do() -> None:
+    repo = mra.get_repo_config()
+    stabilization_branches = mra.get_stabilization_branches(repo)
+
+    mra.run(
+        [
+            "gh",
+            "label",
+            f"--repo={repo['name']}",
+            "create",
+            "--force",
+            "dependencies",
+            "--color=0075ca",
+            "--description=Update the dependencies",
+        ],
+        # exit_on_error=False,
+    )
+    mra.run(
+        [
+            "gh",
+            "label",
+            f"--repo={repo['name']}",
+            "create",
+            "--force",
+            "pull request welcome",
+            "--color=6622BB",
+            "--description=A pull request is welcome to fix this issue",
+        ],
+        # exit_on_error=False,
+    )
+    for branch in [repo.get("master_branch", "master"), *stabilization_branches]:
+        mra.run(
+            [
+                "gh",
+                "label",
+                f"--repo={repo['name']}",
+                "create",
+                "--force",
+                f"backport {branch}",
+                "--color=5aed94",
+                f"--description=Backport the pull request to the '{branch}' branch",
+            ],
+        )
+
+    gopass = "no-gopass" not in repo.get("types", [])
+    token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
+    if os.path.exists(".github/workflows/audit.yaml"):
+        with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                        step.setdefault("with", {})["token"] = token
+                    if "c2cciutils-audit" in step.get("run", ""):
+                        if "debug" in step["name"]:
+                            step["name"] = "Audit Snyk debug"
+                        else:
+                            step["name"] = "Audit"
+                        if not gopass:
+                            step.setdefault("env").update(
+                                {
+                                    "GITHUB_TOKEN": token,
+                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                }
+                            )
+
+                if "branch" in job.get("strategy", {}).get("matrix", {}) and stabilization_branches:
+                    yaml_stabilization_branches = ruamel.yaml.comments.CommentedSeq(stabilization_branches)
+                    yaml_stabilization_branches._yaml_comment = job["strategy"]["matrix"]["branch"].ca
+                    job["strategy"]["matrix"]["branch"] = yaml_stabilization_branches
+
+    if os.path.exists(".github/workflows/changelog.yaml"):
+        with mra.EditYAML(".github/workflows/changelog.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("name", "") == "Create release":
+                        step.setdefault("env", {})["GH_TOKEN"] = token
+                    if step.get("name", "") == "Generate changelog":
+                        step.setdefault("env", {})["AEON_AUTOMATION_GH_TOKEN"] = token
+
+    if os.path.exists(".github/workflows/clean.yaml"):
+        with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if "c2cciutils-clean" in step.get("run", ""):
+                        step["name"] = "Clean Docker hub tags"
+                        if not gopass:
+                            step.setdefault("env", {}).update(
+                                {
+                                    "DOCKERHUB_PASSWORD": "${{ secrets.DOCKER_PASSWORD }}",
+                                    "DOCKERHUB_USERNAME": "${{ secrets.DOCKER_USERNAME }}",
+                                }
+                            )
+
+    if os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
+        with mra.EditYAML(".github/workflows/delete-old-workflow-run.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("uses", "").startswith("MajorScruffy/delete-old-workflow-runs"):
+                        step["uses"] = "MajorScruffy/delete-old-workflow-runs@v0.3.0"
+                        step["name"] = "Delete old workflow runs"
+                        step.setdefault("env", {})["GITHUB_TOKEN"] = token
+
+    if os.path.exists(".github/workflows/dependabot-auto-merge.yaml"):
+        mra.run(
+            [
+                "git",
+                "mv",
+                ".github/workflows/dependabot-auto-merge.yaml",
+                ".github/workflows/dependency-update-review.yaml",
+            ]
+        )
+    if os.path.exists(".github/workflows/dependency-update-review.yaml"):
+        with mra.EditYAML(".github/workflows/dependency-update-review.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("uses", "").startswith("golfzaptw/action-auto-reviews-from-branches"):
+                        step["uses"] = "golfzaptw/action-auto-reviews-from-branches@1.2.3"
+                        step["name"] = "Auto reviews updates"
+                        step.setdefault("with", {}).update({"GITHUB_TOKEN": token, "AUTHOR": "renovate[bot]"})
+
+    if os.path.exists(".github/workflows/pr-checks.yaml"):
+        with mra.EditYAML(".github/workflows/pr-checks.yaml") as yaml:
+            if "attrs" not in yaml["jobs"]["build"]["steps"][0].get("run", ""):
+                yaml["jobs"]["build"]["steps"].insert(
+                    0,
+                    {
+                        "run": "pip install --upgrade attrs",
+                    },
+                )
+            else:
+                yaml["jobs"]["build"]["steps"][0]["run"] = "pip install --upgrade attrs"
+
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("run", "") == "c2cciutils-pull-request-checks":
+                        step["name"] = "Check pull request"
+                        step.setdefault("env", {}).update(
+                            {
+                                "GITHUB_EVENT": "${{ toJson(github) }}",
+                                "GITHUB_TOKEN": token,
+                            }
+                        )
+
+    if os.path.exists(".github/workflows/backport.yaml"):
+        with mra.EditYAML(".github/workflows/backport.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("uses", "") == "camptocamp/backport-action@master":
+                        step.setdefault("with", {})["token"] = token
+
+    if os.path.exists(".github/workflows/rebuild.yaml"):
+        with mra.EditYAML(".github/workflows/rebuild.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("run", "") == "c2cciutils-checks":
+                        if not gopass:
+                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
+                    if "c2cciutils-publish" in step.get("run", ""):
+                        if not gopass:
+                            step.setdefault("env", {}).update(
+                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                            )
+
+    if os.path.exists(".github/workflows/main.yaml"):
+        with mra.EditYAML(".github/workflows/main.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if step.get("uses", "").startswith("actions/checkout"):
+                        step["uses"] = "actions/checkout@v3"
+                    if step.get("run", "") == "c2cciutils-checks":
+                        if not gopass:
+                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
+                    if "c2cciutils-publish" in step.get("run", ""):
+                        if not gopass:
+
+                            step.setdefault("env", {}).update(
+                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                            )
+
+    if os.path.exists(".github/renovate.json5"):
+        with mra.Edit(".github/renovate.json5") as renovate_config:
+            renovate = renovate_config.data
+
+            renovate = re.sub(
+                "schedule: '.*'", "schedule: 'after 5pm on the first day of the month'", renovate
+            )
+
+            # For test
+            if not gopass:
+                put_before = "packageRules"
+                if "regexManagers" in renovate:
+                    put_before = "regexManagers"
+
+                if "osvVulnerabilityAlerts" not in renovate:
+                    renovate = re.sub(
+                        rf"^( +{put_before}:)",
+                        r"  osvVulnerabilityAlerts: true,\n\1",
+                        renovate,
+                        flags=re.MULTILINE,
+                    )
+                if "vulnerabilityAlerts" not in renovate:
+                    renovate = re.sub(
+                        rf"^( +{put_before}:)",
+                        r"  vulnerabilityAlerts: {\n    schedule: ['at any time'],\n    automerge: true,\n  },\n\1",
+                        renovate,
+                        flags=re.MULTILINE,
+                    )
+
+            if stabilization_branches:
+                if "baseBranches" in renovate:
+                    renovate = re.sub(
+                        rf"^( +baseBranches: \[)(.*)\]",
+                        rf"\1{json.dumps([repo.get('master_branch', 'master'), *stabilization_branches])}]",
+                        renovate,
+                    )
+
+            renovate_config.data = renovate
+
+    if os.path.exists("ci/config.yaml"):
+        with mra.Edit("ci/config.yaml") as ci_config:
+            data = ci_config.data.split("\n")
+            if ci_config.data.startswith(
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
+            ):
+                data = data[1:]
+
+            version = "master"
+            if os.path.exists("ci/requirements.txt"):
+                with mra.Edit("ci/requirements.txt") as requirements_txt:
+                    requirement = [
+                        r
+                        for r in requirements_txt.data.split("\n")
+                        if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
+                    ]
+                    if len(requirement) == 1:
+                        version = requirement[0].split("==")[1]
+
+            data = [
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
+                f"c2cciutils/{version}/c2cciutils/schema.json",
+                *data,
+            ]
+
+            ci_config.data = "\n".join(data)
+
+    if os.path.exists(".pre-commit-config.yaml"):
+        with mra.EditPreCommitConfig() as pre_commit_config:
+            pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
+            pre_commit_config.add_hook(
+                "https://github.com/sbrunner/jsonschema-validator",
+                {
+                    "id": "jsonschema-validator",
+                    "files": pre_commit_config.create_files_regex(["ci/config\\.yaml"]),
+                },
+                True,
+            )
+
+    if os.path.exists(".github/renovate.json5"):
+        with mra.EditRenovateConfig() as renovate_config:
+            renovate_config.add_regex_manager(
+                """
+    {
+      fileMatch: ['^ci/config\\\\.yaml$'],
+      matchStrings: [
+        '.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',
+      ],
+      datasourceTemplate: 'github-tags',
+    }""",
+                "https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)",
+            )
+
+
+if __name__ == "__main__":
+    mra.main(
+        _do,
+        # pull_request_on_stabilization_branches
+        # pull_request_title
+        # pull_request_body
+        # branch
+        # pull_request_branch_prefix
+        config={
+            "branch": "fix-repo",
+            "pull_request_title": "Update the CI elements",
+            "pull_request_body": "This is done by the automated script named fix-repo",
+        },
+    )

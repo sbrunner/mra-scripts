@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+
+# to use this script, run:
+#   pip install pre-commit multi-repo-automation
+#   curl https://gist.githubusercontent.com/sbrunner/b0897996c0b475c97b0aef97b7849883/raw/add-pre-commit-hooks add-pre-commit-hooks
+#   chmod +x add-pre-commit-hooks
+#   ./add-pre-commit-hooks --help
+#   ./add-pre-commit-hooks --local
+
+
+import os
+import re
+import subprocess
+
+import multi_repo_automation as mra
+import yaml
+
+
+def _convert():
+    if not mra.get_repo_config().get("pre-commit", True):
+        return
+    mra.run(["pre-commit", "install", "--allow-missing-config"])
+
+    with mra.Edit("README.md") as readme:
+        if "pre-commit" not in readme.data:
+            readme.data += """
+
+## Contributing
+
+Install the pre-commit hooks:
+
+```bash
+pip install pre-commit
+pre-commit install --allow-missing-config
+```
+"""
+
+    if os.path.exists(".github/renovate.json5"):
+        with mra.EditRenovateConfig() as renovate_edit:
+            # renovate = renovate_edit.data
+
+            renovate_edit.data = renovate_edit.data.replace(
+                "'^.pre-commit-config.yaml'", "'^.pre-commit-config.yaml$'"
+            )
+            renovate_edit.add("'pre-commit': { enabled: true },", "'pre-commit'")
+            renovate_edit.add_regex_manager(
+                """
+                fileMatch: ['^.pre-commit-config.yaml$'],
+                matchStrings: [" +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"],
+                """,
+                "'^.pre-commit-config.yaml$'",
+            )
+
+        if os.path.exists("ci/requirements.txt"):
+            with mra.Edit("ci/requirements.txt") as requirements:
+                if "pre-commit" not in requirements.data:
+                    version = (
+                        mra.run(
+                            [
+                                "gh",
+                                "release",
+                                "view",
+                                f"--repo={repo}",
+                                "--json=tagName",
+                                "--template={{.tagName}}",
+                            ],
+                            stdout=subprocess.PIPE,
+                        )
+                        .stdout.strip()
+                        .strip("v")
+                    )
+
+                    requirements.data = requirements.data.rstrip() + f"\npre-commit=={version}\n"
+
+    if not os.path.exists(".pre-commit-config.yaml"):
+        with open(".pre-commit-config.yaml", "w") as f:
+            f.write(
+                """# https://pre-commit.com/hooks.html
+
+ci:
+  autoupdate_schedule: quarterly
+
+repos: []
+"""
+            )
+
+    with mra.Edit(".pre-commit-config.yaml") as config:
+        # TODO add missing # pip and # npm
+        config.data = config.data.replace(
+            "https://github.com/sbrunner/pre-commit-copyright", "https://github.com/sbrunner/hooks"
+        )
+        if os.path.exists(".github/renovate.json5"):
+            config.data = re.sub(r"^( +- [^\s]+==[^\s]+)$", r"\1 # pypi", config.data, flags=re.MULTILINE)
+            config.data = re.sub(r"^( +- [^\s]+@[^\s]+)$", r"\1 # npm", config.data, flags=re.MULTILINE)
+
+    import time
+
+    time.sleep(1)
+
+    ci_config = {}
+    if os.path.exists("ci/config.yaml"):
+        with open("ci/config.yaml", encoding="utf-8") as f:
+            ci_config = yaml.safe_load(f)
+
+    with mra.EditPreCommitConfig() as pre_commit_config:
+        # pre_commit_config.setdefault("ci", {}).setdefault("autoupdate_schedule", "quarterly")
+        repos_hooks = {}
+        for repo in pre_commit_config["repos"]:
+            repos_hooks.setdefault(
+                repo["repo"], {"repo": repo, "hooks": {hook["id"]: hook for hook in repo["hooks"]}}
+            )
+
+        spell_options = {}
+        spell = ci_config.get("checks", {}).get("codespell", {})
+
+        ignore_re = []
+        if isinstance(spell, dict):
+            ignore_re = spell.get("ignore_re", [])
+
+        if "poetry.lock" in mra.all_filenames() and "^(.*/)?poetry\\.lock$" not in ignore_re:
+            ignore_re.append(r"^(.*/)?poetry\.lock$")
+
+        spell_options["exclude"] = pre_commit_config.create_files_regex(ignore_re)
+
+        if os.path.exists("spell-ignore-words.txt") and not os.path.exists(".spell-ignore-words.txt"):
+            mra.run(["git", "mv", "spell-ignore-words.txt", ".spell-ignore-words.txt"])
+        if os.path.exists(".spell-ignore-words.txt"):
+            spell_options["args"] = ["--ignore-words=.spell-ignore-words.txt"]
+
+            if os.path.exists("ci/config.yaml"):
+                with mra.EditYAML("ci/config.yaml") as config:
+                    config.setdefault("checks", {})["codespell"] = False
+
+        black_options = {}
+        black = ci_config.get("checks", {}).get("black")
+        if black and "ignore_patterns_re" in black:
+            black_options["exclude"] = pre_commit_config.create_files_regex(black["ignore_patterns_re"])
+
+        pre_commit_config.skip_ci("copyright")
+
+        pre_commit_config.add_repo("https://github.com/pre-commit/pre-commit-hooks")
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "detect-private-key"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "check-merge-conflict"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "check-ast"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "debug-statements"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "check-toml"},
+        )
+        # Is Helm repository
+        if os.path.exists("Chart.yaml"):
+            pre_commit_config.add_hook(
+                "https://github.com/pre-commit/pre-commit-hooks",
+                {
+                    "id": "check-yaml",
+                    "exclude": r"^templates/.+\.yaml$",
+                    "args": ["--allow-multiple-documents"],
+                },
+            )
+        else:
+            pre_commit_config.add_hook("https://github.com/pre-commit/pre-commit-hooks", {"id": "check-yaml"})
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "check-json"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "end-of-file-fixer"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "trailing-whitespace"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/pre-commit-hooks",
+            {"id": "mixed-line-ending"},
+        )
+
+        pre_commit_config.add_repo("https://github.com/sbrunner/hooks")
+
+        pre_commit_config.add_hook("https://github.com/sbrunner/hooks", {"id": "copyright"})
+        if (
+            "poetry.lock"
+            in mra.run(["git", "ls-files"], stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout
+        ):
+            pre_commit_config.add_hook(
+                "https://github.com/sbrunner/hooks",
+                {
+                    "id": "poetry-check",
+                    "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                        ["poetry==1.3.2"], "pypi"
+                    ),
+                },
+            )
+            pre_commit_config.skip_ci("poetry-check")
+
+        pre_commit_config.add_repo("https://github.com/codespell-project/codespell")
+        pre_commit_config.add_hook(
+            "https://github.com/codespell-project/codespell", {"id": "codespell", **spell_options}
+        )
+
+        pre_commit_config.add_repo("https://github.com/pre-commit/mirrors-prettier")
+        pre_commit_config.add_hook(
+            "https://github.com/pre-commit/mirrors-prettier",
+            {
+                "id": "prettier",
+                "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                    [
+                        "prettier@2.8.1",
+                        "prettier-plugin-sh@0.12.8",
+                        "prettier-plugin-toml@0.3.1",
+                        "@prettier/plugin-xml@0.12.0",
+                    ],
+                    "npm",
+                ),
+            },
+        )
+
+        pre_commit_config.add_repo("https://github.com/shellcheck-py/shellcheck-py")
+        pre_commit_config.add_hook(
+            "https://github.com/shellcheck-py/shellcheck-py",
+            {
+                "id": "shellcheck",
+                # "types": ["file"], "types_or": ["shell", "dockerfile"]
+            },
+        )
+
+        pre_commit_config.add_repo("https://github.com/jumanjihouse/pre-commit-hooks")
+        pre_commit_config.add_hook("https://github.com/jumanjihouse/pre-commit-hooks", {"id": "git-check"})
+
+        pre_commit_config.add_repo("https://github.com/python-jsonschema/check-jsonschema")
+        if os.path.exists("action.yml"):
+            pre_commit_config.add_hook(
+                "https://github.com/python-jsonschema/check-jsonschema",
+                {"id": "check-github-actions"},
+            )
+        pre_commit_config.add_hook(
+            "https://github.com/python-jsonschema/check-jsonschema",
+            {"id": "check-github-workflows"},
+        )
+        pre_commit_config.add_hook(
+            "https://github.com/python-jsonschema/check-jsonschema",
+            {
+                "id": "check-jsonschema",
+                "name": "Check GitHub Workflows set timeout-minutes",
+                "files": r"^\.github/workflows/[^/]+$",
+                "types": ["yaml"],
+                "args": ["--builtin-schema", "github-workflows-require-timeout"],
+            },
+        )
+        if os.path.exists(".github/renovate.json5"):
+            pre_commit_config.add_hook(
+                "https://github.com/python-jsonschema/check-jsonschema",
+                {
+                    "id": "check-renovate",
+                    "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                        ["pyjson5==1.6.2"], "pypi"
+                    ),
+                },
+            )
+
+        pre_commit_config.add_repo("https://github.com/sirwart/ripsecrets")
+        pre_commit_config.add_hook("https://github.com/sirwart/ripsecrets", {"id": "ripsecrets"})
+        pre_commit_config.skip_ci("ripsecrets")
+
+        # TODO
+        if mra.all_filenames_identify("python"):
+            pre_commit_config.add_repo("https://github.com/PyCQA/autoflake")
+            pre_commit_config.add_hook("https://github.com/PyCQA/autoflake", {"id": "autoflake"})
+
+            pre_commit_config.add_repo("https://github.com/asottile/pyupgrade")
+            pre_commit_config.add_hook(
+                "https://github.com/asottile/pyupgrade", {"id": "pyupgrade", "args": ["--py38-plus"]}
+            )
+
+            pre_commit_config.add_repo("https://github.com/PyCQA/isort")
+            pre_commit_config.add_hook("https://github.com/PyCQA/isort", {"id": "isort"})
+
+            pre_commit_config.add_repo("https://github.com/psf/black")
+            pre_commit_config.add_hook("https://github.com/psf/black", {"id": "black", **black_options})
+
+        # if os.path.exists(".prospector.yaml"):
+        #    pre_commit_config.skip_ci((
+        #        "https://github.com/PyCQA/prospector",
+        #    )
+        #    pre_commit_config.add_hook(
+        #        "https://github.com/PyCQA/prospector",
+        #        {
+        #            "id": "prospector",
+        #            "args": ["--tool=pydocstyle", "--die-on-tool-error", "--output-format=pylint"],
+        #        },
+        #    )
+        if os.path.exists(".eslint.yaml"):
+            pre_commit_config.add_repo("https://github.com/pre-commit/mirrors-eslint")
+            pre_commit_config.add_hook(
+                "https://github.com/pre-commit/mirrors-eslint",
+                {
+                    "id": "eslint",
+                    "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                        [
+                            "@typescript-eslint/eslint-plugin@5.48.0",
+                            "@typescript-eslint/parser@5.48.0",
+                            "eslint@8.31.0",
+                            "eslint-plugin-jsdoc@39.6.4",
+                        ],
+                        "npm",
+                    ),
+                },
+            )
+
+    if os.path.exists(".github/workflows/main.yaml"):
+        with mra.EditYAML(".github/workflows/main.yaml") as main:
+            for job in main["jobs"].values():
+                found = False
+                index = -1
+                for nb, step in enumerate(job["steps"]):
+                    index = nb
+                    if step.get("run") == "pre-commit run --all-files":
+                        found = True
+                        break
+
+                if found:
+                    if len(job["steps"]) > index + 1:
+                        if job["steps"][index + 1].get("run", "") == "git diff":
+                            job["steps"][index + 1]["run"] = "git diff && false"
+                        elif job["steps"][index + 1].get("run", "") != "git diff && false":
+                            job["steps"].insert(index + 1, {"run": "git diff && false", "if": "failure()"})
+                    else:
+                        job["steps"].append({"run": "git diff && false", "if": "failure()"})
+                else:
+                    index = -1
+                    for nb, step in enumerate(job["steps"]):
+                        if step.get("name") == "Checks":
+                            index = nb
+                            break
+                    if index != -1:
+                        job["steps"].insert(index, {"run": "git diff && false", "if": "failure()"})
+                        job["steps"].insert(
+                            index,
+                            {"run": "pre-commit run --all-files"},
+                        )
+                        job["steps"].insert(
+                            index,
+                            {
+                                "uses": "actions/cache@v3",
+                                "with": {
+                                    "path": "~/.cache/pre-commit",
+                                    "key": "pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}",
+                                    "restore-keys": "pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}\npre-commit-",
+                                },
+                            },
+                        )
+
+    if mra.get_arguments().run_pre_commit:
+        mra.run(
+            ["pre-commit", "run", "--all-files"],
+            exit_on_error=False,
+        )
+
+
+def add_arguments(args_parser):
+    args_parser = args_parser.add_argument_group("pre-commit", "Parameters related to the pre-commit.")
+    args_parser.add_argument(
+        "--no-repo",
+        default="",
+        help="Don't add the repo its, comma separate list",
+    )
+    args_parser.add_argument(
+        "--no-hook",
+        default="",
+        help="Don't add the hook its, comma separate list",
+    )
+    args_parser.add_argument(
+        "--run-pre-commit",
+        action="store_true",
+        help="Run pre-commit run --all-files",
+    )
+
+
+if __name__ == "__main__":
+    mra.main(
+        _convert,
+        config={
+            "pull_request_title": "Add/update pre-commit hooks",
+            "pull_request_body": "Add/update pre-commit hooks generated by add-pre-commit-hooks command",
+            "branch": "pre-commit",
+        },
+        add_arguments=add_arguments,
+    )

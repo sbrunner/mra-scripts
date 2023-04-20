@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+
+
+import random
+import re
+import subprocess
+import sys
+
+import c2cciutils.security
+import multi_repo_automation as mra
+import requests
+import ruamel
+import toml
+import yaml
+from identify import identify
+from ruamel.yaml import YAML
+
+# if os.path.exists(".github/renovate.json5"):
+# if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
+# if mra.git_grep(r"\<text\>"]): # found
+# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
+# mra.edit("file")
+# input()
+
+resume = []
+
+
+def _do() -> None:
+    mra.run(["git", "fetch"])
+
+    mra.run(["git", "reset", "--mixed"])
+    mra.run(["git", "stash", "--include-untracked", "--all", "--message=Git-clean"])
+
+    repo_config = mra.get_repo_config()
+    resume.append(f"== Repo {repo_config['name']} ==")
+
+    if mra.run(["git", "status", "--short"], stdout=subprocess.PIPE).stdout.strip() != "":
+        resume.append("Your repository should be clean")
+        resume.append("Use `git reset --hard` and `git clean -fd` to clean it")
+        return
+
+    mra.run(["git", "fetch", "--all", "--prune"])
+    original_branch = mra.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=subprocess.PIPE
+    ).stdout.strip()
+
+    try:
+        remotes = mra.run(["git", "remote"], stdout=subprocess.PIPE).stdout.strip().split("\n")
+        remote = "origin"
+        if "upstream" in remotes:
+            remote = "upstream"
+
+        all_branches = [
+            b.strip() for b in mra.run(["git", "branch"], stdout=subprocess.PIPE).stdout.strip().split("\n")
+        ]
+        print(f"== Branches: {', '.join(all_branches)}")
+
+        stabilization_branches = set(repo_config.get("stabilization_branches", []))
+        stabilization_branches.add(repo_config.get("master_branch", "master"))
+
+        all_branches_with_remote = [
+            b.strip()
+            for b in mra.run(["git", "branch", "--all"], stdout=subprocess.PIPE).stdout.strip().split("\n")
+        ]
+        all_remote_branches = [
+            b[len(f"remotes/{remote}/") :]
+            for b in all_branches_with_remote
+            if b.startswith(f"remotes/{remote}/")
+        ]
+        re1_ = re.compile(r"^release_[0-9]+$")
+        re2_ = re.compile(r"^[0-9]+\.[0-9]+$")
+        all_remote_branches_filtered = [b for b in all_remote_branches if re1_.match(b) or re2_.match(b)]
+        stabilization_branches = list(set([*stabilization_branches, *all_remote_branches_filtered]))
+
+        temp_branch = ""
+        for branch in all_branches:
+            if branch.startswith("* "):
+                branch = branch[2:]
+            if branch != "gh-pages" and branch not in stabilization_branches:
+                print(f"== Work on branch '{branch}'")
+                if branch.isdigit():
+                    resume.append(f"Delete temporary branch '{branch}'")
+                    mra.run(["git", "branch", "-D", branch])
+                    continue
+                selected_main_branch_list = []
+                ahead = 1000
+                for main_branch in stabilization_branches:
+                    ahead_ = int(
+                        mra.run(
+                            ["git", "rev-list", "--count", f"{remote}/{main_branch}..{branch}", "--"],
+                            check=True,
+                            stdout=subprocess.PIPE,
+                        ).stdout
+                    )
+                    print(f"== Branch {branch}, is {ahead_} ahead from {main_branch}.")
+                    if ahead_ < ahead:
+                        selected_main_branch_list = [main_branch]
+                        ahead = ahead_
+                if not selected_main_branch_list:
+                    resume.append(f"Branch {branch} is ahead from all remote branches.")
+                    continue
+
+                behind = 9999999
+                if len(selected_main_branch_list) > 1:
+                    for main_branch in selected_main_branch_list:
+                        behind_ = int(
+                            mra.run(
+                                ["git", "rev-list", "--count", f"{branch}..{remote}/{main_branch}", "--"],
+                                check=True,
+                                stdout=subprocess.PIPE,
+                            ).stdout
+                        )
+                        if behind_ < behind:
+                            selected_main_branch = main_branch
+                            behind = behind_
+                else:
+                    selected_main_branch = selected_main_branch_list[0]
+
+                behind = int(
+                    mra.run(
+                        ["git", "rev-list", "--count", f"{branch}..{remote}/{selected_main_branch}", "--"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                    ).stdout
+                )
+                resume.append(
+                    f"Branch {branch}, based on {selected_main_branch} "
+                    f"(with {behind} behind and {ahead} ahead commits)"
+                )
+
+                if ahead == 0 and branch != original_branch:
+                    mra.run(["git", "checkout", original_branch])
+                    resume.append(f"Delete merged branch '{branch}'")
+                    mra.run(["git", "branch", "-D", branch])
+                    continue
+
+                temp_branch = str(random.randrange(1000000))  # nosec
+                mra.run(["git", "checkout", "-b", temp_branch, branch])
+                try:
+                    process = mra.run(
+                        ["git", "rebase", f"{remote}/{selected_main_branch}"], exit_on_error=False
+                    )
+                    if process.returncode != 0:
+                        print(f"== Error on rebase {branch} on {selected_main_branch}")
+                        mra.run(["git", "rebase", "--abort"])
+
+                    ahead = int(
+                        mra.run(
+                            ["git", "rev-list", "--count", f"{remote}/{selected_main_branch}..HEAD", "--"],
+                            check=True,
+                            stdout=subprocess.PIPE,
+                        ).stdout
+                    )
+                    mra.run(["git", "checkout", original_branch])
+                    if ahead == 0 and branch != original_branch:
+                        resume.append(f"Delete merged branch '{branch}'...")
+                        mra.run(["git", "branch", "-D", branch])
+                finally:
+                    mra.run(["git", "reset", "--hard"])
+                    proc = mra.run(["git", "checkout", original_branch], exit_on_error=False)
+                    if proc.returncode != 0:
+                        mra.run(
+                            ["git", "checkout", repo_config.get("master_branch", "master")],
+                            exit_on_error=False,
+                        )
+                    mra.run(["git", "branch", "-D", temp_branch])
+
+        print()
+        print("== Cleanup...")
+        mra.run(["git", "prune"], exit_on_error=False)
+        mra.run(["git", "gc"], exit_on_error=False)
+
+    finally:
+        while (
+            mra.run(["git", "stash", "list"], stdout=subprocess.PIPE)
+            .stdout.split("\n")[0]
+            .endswith(": Git-clean")
+        ):
+            mra.run(["git", "stash", "pop"], exit_on_error=False)
+
+
+if __name__ == "__main__":
+    try:
+        mra.main(
+            _do,
+            # pull_request_on_stabilization_branches
+            # pull_request_title
+            # pull_request_body
+            # branch
+            # pull_request_branch_prefix
+            config={},
+        )
+    finally:
+        print()
+        print("====== Resume ======")
+        for message in resume:
+            print(message)
