@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import re
+from email.policy import default
+
+import multi_repo_automation as mra
+import ruamel.yaml.comments
+
+
+def _do() -> None:
+    repo = mra.get_repo_config()
+
+    stabilization_branches = mra.get_stabilization_branches(repo)
+    arguments = mra.get_arguments()
+
+    if arguments.version:
+        version = arguments.version
+        stabilization_branches.append(version)
+
+        if os.path.exists("SECURITY.md"):
+            with mra.Edit("SECURITY.md") as security_md:
+                security_md_lines = security_md.data.split()
+                index = -1
+                for i, line in enumerate(security_md_lines):
+                    if line.startswith("| "):
+                        index = i
+
+                new_line = f"| {version} | {arguments.supported_until} |"
+                if arguments.upstream_supported_until:
+                    new_line += f" {arguments.upstream_supported_until} |"
+
+                security_md.data = "\n".join(
+                    [*security_md_lines[:index], new_line, *security_md_lines[index:]]
+                )
+
+    stabilization_branches_with_master = [repo.get("master_branch", "master"), *stabilization_branches]
+
+    for labels in mra.gh_json("label", ["name"], "list"):
+        if labels["name"].startswith("backport "):
+            if labels["name"].replace("backport ", "") not in stabilization_branches_with_master:
+                mra.gh(["label", "delete", labels["name"]])
+
+    for branch in stabilization_branches_with_master:
+        mra.gh(
+            [
+                "label",
+                "create",
+                "--force",
+                f"backport {branch}",
+                "--color=5aed94",
+                f"--description=Backport the pull request to the '{branch}' branch",
+            ],
+        )
+
+    if os.path.exists(".github/renovate.json5"):
+        with mra.EditRenovateConfig(".github/renovate.json5") as renovate_config:
+            if stabilization_branches:
+                if "baseBranches" in renovate:
+                    renovate = re.sub(
+                        rf"^( +baseBranches: \[)(.*)\]",
+                        rf"\1{json.dumps(stabilization_branches_with_master)}",
+                        renovate,
+                    )
+                else:
+                    renovate_config.add(
+                        f"baseBranches: {json.dumps(stabilization_branches_with_master)}", "baseBranches"
+                    )
+
+    if os.path.exists(".github/workflows/audit.yaml"):
+        with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                if "branch" in job.get("strategy", {}).get("matrix", {}) and stabilization_branches:
+                    yaml_stabilization_branches = ruamel.yaml.comments.CommentedSeq(stabilization_branches)
+                    yaml_stabilization_branches._yaml_comment = job["strategy"]["matrix"]["branch"].ca
+                    job["strategy"]["matrix"]["branch"] = yaml_stabilization_branches
+
+
+def add_arguments(args_parser):
+    args_parser = args_parser.add_argument_group(
+        "new-version", "Create a new version with a stabilisation branch"
+    )
+    args_parser.add_argument(
+        "--version",
+        help="The version to create",
+    )
+    args_parser.add_argument(
+        "--supported-until",
+        help="The date until the version is supported, can also be To be defined or Best effort",
+        default="Best effort",
+    )
+    args_parser.add_argument(
+        "--upstream-supported-until",
+        help="The date until the version is supported upstream",
+    )
+
+
+if __name__ == "__main__":
+    mra.main(
+        _do,
+        # pull_request_on_stabilization_branches
+        # pull_request_title
+        # pull_request_body
+        # branch
+        # pull_request_branch_prefix
+        config={
+            "branch": "new-version",
+            "pull_request_title": "Add a new stabilisation version",
+            "pull_request_body": "This is done by the automated script named " + __file__,
+        },
+        add_arguments=add_arguments,
+    )

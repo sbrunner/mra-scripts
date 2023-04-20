@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import json
 import os
 import re
 
@@ -15,48 +14,33 @@ import ruamel.yaml.comments
 # input()
 
 
+# TODO remove the checks in the ci config
+def _prototype() -> None:
+    if os.path.exists("ci/config.yaml"):
+        with mra.EditYAML("ci/config.yaml") as config:
+            if "checks" in config:
+                del config["checks"]
+
+
 def _do() -> None:
     repo = mra.get_repo_config()
-    stabilization_branches = mra.get_stabilization_branches(repo)
 
-    mra.run(
-        [
-            "gh",
-            "label",
-            f"--repo={repo['name']}",
-            "create",
-            "--force",
-            "dependencies",
-            "--color=0075ca",
-            "--description=Update the dependencies",
-        ],
-        # exit_on_error=False,
+    mra.gh(
+        "label",
+        "create",
+        "--force",
+        "dependencies",
+        "--color=0075ca",
+        "--description=Update the dependencies",
     )
-    mra.run(
-        [
-            "gh",
+    if "pull-request-welcome" not in repo.get("types", []):
+        mra.gh(
             "label",
-            f"--repo={repo['name']}",
             "create",
             "--force",
             "pull request welcome",
             "--color=6622BB",
             "--description=A pull request is welcome to fix this issue",
-        ],
-        # exit_on_error=False,
-    )
-    for branch in [repo.get("master_branch", "master"), *stabilization_branches]:
-        mra.run(
-            [
-                "gh",
-                "label",
-                f"--repo={repo['name']}",
-                "create",
-                "--force",
-                f"backport {branch}",
-                "--color=5aed94",
-                f"--description=Backport the pull request to the '{branch}' branch",
-            ],
         )
 
     gopass = "no-gopass" not in repo.get("types", [])
@@ -80,11 +64,6 @@ def _do() -> None:
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
                                 }
                             )
-
-                if "branch" in job.get("strategy", {}).get("matrix", {}) and stabilization_branches:
-                    yaml_stabilization_branches = ruamel.yaml.comments.CommentedSeq(stabilization_branches)
-                    yaml_stabilization_branches._yaml_comment = job["strategy"]["matrix"]["branch"].ca
-                    job["strategy"]["matrix"]["branch"] = yaml_stabilization_branches
 
     if os.path.exists(".github/workflows/changelog.yaml"):
         with mra.EditYAML(".github/workflows/changelog.yaml") as yaml:
@@ -204,49 +183,15 @@ def _do() -> None:
                             step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
                     if "c2cciutils-publish" in step.get("run", ""):
                         if not gopass:
-
                             step.setdefault("env", {}).update(
                                 {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
                             )
 
     if os.path.exists(".github/renovate.json5"):
         with mra.Edit(".github/renovate.json5") as renovate_config:
-            renovate = renovate_config.data
-
-            renovate = re.sub(
-                "schedule: '.*'", "schedule: 'after 5pm on the first day of the month'", renovate
+            renovate_config.data = re.sub(
+                "schedule: '.*'", "schedule: 'after 5pm on the first day of the month'", renovate_config.data
             )
-
-            # For test
-            if not gopass:
-                put_before = "packageRules"
-                if "regexManagers" in renovate:
-                    put_before = "regexManagers"
-
-                if "osvVulnerabilityAlerts" not in renovate:
-                    renovate = re.sub(
-                        rf"^( +{put_before}:)",
-                        r"  osvVulnerabilityAlerts: true,\n\1",
-                        renovate,
-                        flags=re.MULTILINE,
-                    )
-                if "vulnerabilityAlerts" not in renovate:
-                    renovate = re.sub(
-                        rf"^( +{put_before}:)",
-                        r"  vulnerabilityAlerts: {\n    schedule: ['at any time'],\n    automerge: true,\n  },\n\1",
-                        renovate,
-                        flags=re.MULTILINE,
-                    )
-
-            if stabilization_branches:
-                if "baseBranches" in renovate:
-                    renovate = re.sub(
-                        rf"^( +baseBranches: \[)(.*)\]",
-                        rf"\1{json.dumps([repo.get('master_branch', 'master'), *stabilization_branches])}]",
-                        renovate,
-                    )
-
-            renovate_config.data = renovate
 
     if os.path.exists("ci/config.yaml"):
         with mra.Edit("ci/config.yaml") as ci_config:
@@ -256,7 +201,10 @@ def _do() -> None:
             ):
                 data = data[1:]
 
-            version = "master"
+            while data and not data[0].strip():
+                data = data[1:]
+
+            version_minor = "1.6"
             if os.path.exists("ci/requirements.txt"):
                 with mra.Edit("ci/requirements.txt") as requirements_txt:
                     requirement = [
@@ -266,10 +214,13 @@ def _do() -> None:
                     ]
                     if len(requirement) == 1:
                         version = requirement[0].split("==")[1]
+                        version_split = version.split(".")
+                        version_minor = ".".join(version_minor[:2]) if len(version_split) > 2 else version
 
             data = [
                 "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
-                f"c2cciutils/{version}/c2cciutils/schema.json",
+                f"c2cciutils/{version_minor}/c2cciutils/schema.json",
+                "",
                 *data,
             ]
 
@@ -291,13 +242,12 @@ def _do() -> None:
         with mra.EditRenovateConfig() as renovate_config:
             renovate_config.add_regex_manager(
                 """
-    {
-      fileMatch: ['^ci/config\\\\.yaml$'],
-      matchStrings: [
-        '.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',
-      ],
-      datasourceTemplate: 'github-tags',
-    }""",
+                fileMatch: ['^ci/config\\\\.yaml$'],
+                matchStrings: [
+                '.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',
+                ],
+                datasourceTemplate: 'github-tags',
+                """,
                 "https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)",
             )
 
@@ -312,7 +262,7 @@ if __name__ == "__main__":
         # pull_request_branch_prefix
         config={
             "branch": "fix-repo",
-            "pull_request_title": "Update the CI elements",
-            "pull_request_body": "This is done by the automated script named fix-repo",
+            "pull_request_title": "Update to c2cciutils version 1.6",
+            "pull_request_body": "This is done by the automated script named " + __file__,
         },
     )

@@ -4,7 +4,6 @@
 import random
 import re
 import subprocess
-import sys
 
 import c2cciutils.security
 import multi_repo_automation as mra
@@ -70,7 +69,7 @@ def _do() -> None:
         re1_ = re.compile(r"^release_[0-9]+$")
         re2_ = re.compile(r"^[0-9]+\.[0-9]+$")
         all_remote_branches_filtered = [b for b in all_remote_branches if re1_.match(b) or re2_.match(b)]
-        stabilization_branches = list(set([*stabilization_branches, *all_remote_branches_filtered]))
+        stabilization_branches = list({*stabilization_branches, *all_remote_branches_filtered})
 
         temp_branch = ""
         for branch in all_branches:
