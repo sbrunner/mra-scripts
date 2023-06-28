@@ -43,24 +43,22 @@ def _do() -> None:
 
     for branch in stabilization_branches_with_master:
         mra.gh(
-            [
-                "label",
-                "create",
-                "--force",
-                f"backport {branch}",
-                "--color=5aed94",
-                f"--description=Backport the pull request to the '{branch}' branch",
-            ],
+            "label",
+            "create",
+            "--force",
+            f"backport {branch}",
+            "--color=5aed94",
+            f"--description=Backport the pull request to the '{branch}' branch",
         )
 
     if os.path.exists(".github/renovate.json5"):
         with mra.EditRenovateConfig(".github/renovate.json5") as renovate_config:
             if stabilization_branches:
-                if "baseBranches" in renovate:
-                    renovate = re.sub(
+                if "baseBranches" in renovate_config.data:
+                    renovate_config.data = re.sub(
                         rf"^( +baseBranches: \[)(.*)\]",
                         rf"\1{json.dumps(stabilization_branches_with_master)}",
-                        renovate,
+                        renovate_config.data,
                     )
                 else:
                     renovate_config.add(
