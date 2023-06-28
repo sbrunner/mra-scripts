@@ -83,10 +83,16 @@ def _do() -> None:
     if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
             for job in yaml["jobs"].values():
-                for step in job["steps"]:
+                checkout_step = -999
+                missing_git_config = False
+                for nb, step in enumerate(job["steps"]):
                     if step.get("uses", "").startswith("actions/checkout"):
                         step["uses"] = "actions/checkout@v3"
                         step.setdefault("with", {})["token"] = token
+                        checkout_step = nb
+                    if nb == checkout_step + 1:
+                        if not step.get("run", "").startswith("git config ") and not gopass:
+                            missing_git_config = True
                     if "c2cciutils-audit" in step.get("run", ""):
                         if "debug" in step["name"]:
                             step["name"] = "Audit Snyk debug"
@@ -99,6 +105,21 @@ def _do() -> None:
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
                                 }
                             )
+                if missing_git_config:
+                    job["steps"].insert(
+                        checkout_step + 1,
+                        {
+                            "name": "Configure git user name",
+                            "run": 'git config user.name "Snyk autofix"',
+                        },
+                    )
+                    job["steps"].insert(
+                        checkout_step + 1,
+                        {
+                            "name": "Configure git user email",
+                            "run": 'git config user.email "snyk@ci.com"',
+                        },
+                    )
 
     if os.path.exists(".github/workflows/changelog.yaml"):
         with mra.EditYAML(".github/workflows/changelog.yaml") as yaml:
@@ -147,9 +168,19 @@ def _do() -> None:
                 ".github/workflows/dependency-update-review.yaml",
             ]
         )
+    if os.path.exists(".github/workflows/auto-review.yaml"):
+        mra.run(
+            [
+                "git",
+                "mv",
+                ".github/workflows/auto-review.yaml",
+                ".github/workflows/dependency-update-review.yaml",
+            ]
+        )
     if os.path.exists(".github/workflows/dependency-update-review.yaml"):
         with mra.EditYAML(".github/workflows/dependency-update-review.yaml") as yaml:
             for job in yaml["jobs"].values():
+                job["if"] = "github.event.pull_request.user.login == 'renovate[bot]'"
                 for step in job["steps"]:
                     if step.get("uses", "").startswith("actions/checkout"):
                         step["uses"] = "actions/checkout@v3"
@@ -298,7 +329,10 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
     if os.path.exists(".github/renovate.json5"):
         with mra.Edit(".github/renovate.json5") as renovate_config:
             renovate_config.data = re.sub(
-                "schedule: '.*'", "schedule: 'after 5pm on the first day of the month'", renovate_config.data
+                "schedule: '.*'",
+                "schedule: 'after 5pm on the first day of the month'",
+                renovate_config.data,
+                1,
             )
 
     if os.path.exists("ci/config.yaml"):
@@ -370,8 +404,8 @@ if __name__ == "__main__":
         # pull_request_branch_prefix
         config={
             "branch": "fix-repo",
-            "pull_request_title": "Update to c2cciutils version 1.6",
-            "pull_request_body": "This is done by the automated script named " + __file__,
+            "pull_request_title": "Update to c2cciutils version 1.6 (CI updates)",
+            "pull_request_body": "This is done by the automated script named " + os.path.basename(__file__),
         },
         description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
     )
