@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+
+import os
+import subprocess
+
+import multi_repo_automation as mra
+import ruamel.yaml.comments
+import yaml
+
+# if os.path.exists(".github/renovate.json5"):
+# if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
+# if mra.git_grep(r"\<text\>"]): # found
+# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
+# mra.edit("file")
+# input()
+
+with open(
+    "/home/sbrunner/workspace/prospector-profile-conflict/prospector_profile_duplicated/prospector.yaml",
+    encoding="utf-8",
+) as f:
+    profile = yaml.safe_load(f)
+
+
+def _do() -> None:
+    for pyproject_toml_file_name in mra.run(
+        ["git", "ls-files", "pyproject.toml"], stdout=subprocess.PIPE
+    ).stdout.split("\n"):
+        if (
+            pyproject_toml_file_name
+            and mra.run(["grep", "^prospector = ", pyproject_toml_file_name], exit_on_error=False).returncode
+            == 0
+        ):
+            if (
+                pyproject_toml_file_name
+                and mra.run(
+                    ["grep", "^prospector-profile-duplicated = ", pyproject_toml_file_name],
+                    exit_on_error=False,
+                ).returncode
+                != 0
+            ):
+                mra.run(
+                    ["poetry", "add", "--group=dev", "prospector-profile-duplicated==0.1.0"],
+                    cwd=os.path.dirname(pyproject_toml_file_name)
+                    if pyproject_toml_file_name != "pyproject.toml"
+                    else None,
+                )
+
+    if os.path.exists(".pre-commit-config.yaml"):
+        with mra.EditPreCommitConfig() as pre_commit_config:
+            for repo in pre_commit_config["repos"]:
+                if repo["repo"] == "https://github.com/PyCQA/prospector":
+                    for hook in repo["hooks"]:
+                        pre_commit_config.add_commented_additional_dependencies(
+                            hook, ["prospector-profile-duplicated==0.1.0"], "pypi"
+                        )
+
+    if os.path.exists(".prospector.yaml"):
+        with mra.EditYAML(".prospector.yaml") as yaml:
+            if "inherits" in yaml:
+                yaml["inherits"].append("duplicated")
+            else:
+                yaml.data.insert(0, "inherits", ["duplicated"])
+
+            for key, value in yaml.items():
+                if key in profile and "disable" in value:
+                    for disable in profile[key]["disable"]:
+                        if disable in value["disable"]:
+                            index = value["disable"].index(disable)
+                            del value["disable"][index]
+                    if not value["disable"]:
+                        del value["disable"]
+
+        return
+
+
+if __name__ == "__main__":
+    mra.main(
+        _do,
+        # pull_request_on_stabilization_branches
+        # pull_request_title
+        # pull_request_body
+        # branch
+        # pull_request_branch_prefix
+        config={
+            "branch": "prospector-profile",
+            "pull_request_title": "Use the new Prospector profile to avoid conflict or duplicated",
+            "pull_request_body": """See: https://pypi.org/project/prospector-profile-duplicated/
+
+This is done by the automated script named """
+            + os.path.basename(__file__),
+        },
+        # description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
+    )
