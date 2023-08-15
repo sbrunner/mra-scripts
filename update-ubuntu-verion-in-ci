@@ -27,8 +27,8 @@ def _do() -> None:
             with mra.EditYAML(workflow_file) as yaml:
                 for job in yaml["jobs"].values():
                     if job.get("runs-on", "").startswith("ubuntu-"):
-                        if job["runs-on"] == "ubuntu-18.04":
-                            job["runs-on"] = "ubuntu-20.04"
+                        if job["runs-on"] == "ubuntu-20.04":
+                            job["runs-on"] = "ubuntu-22.04"
 
 
 if __name__ == "__main__":
@@ -42,7 +42,7 @@ if __name__ == "__main__":
         config={
             "pull_request_on_stabilization_branches": True,
             "pull_request_branch_prefix": "update-ubuntu",
-            "pull_request_title": "Update the used Ubuntu version to from 18.04 to 20.04 in the workflows",
+            "pull_request_title": "Update the used Ubuntu version to from 20.04 to 22.04 in the workflows",
             "pull_request_body": "",
         },
     )
