@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+
+import re
+import subprocess
+
+import c2cciutils.security
+import multi_repo_automation as mra
+import requests
+import ruamel
+import toml
+import yaml
+from identify import identify
+from ruamel.yaml import YAML
+
+# if os.path.exists(".github/renovate.json5"):
+# if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
+# if mra.git_grep(r"\<text\>"]): # found
+# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
+# mra.edit("file")
+# input()
+
+# .pre-commit-config.yaml
+
+
+def _do() -> None:
+    with mra.EditYAML(".pre-commit-config.yaml") as pre_commit_config:
+        for repo in pre_commit_config["repos"]:
+            if repo["repo"] == "https://github.com/asottile/pyupgrade":
+                for hook in repo["hooks"]:
+                    if hook["id"] == "pyupgrade":
+                        hook["args"] = ["--py39-plus"]
+    for pyproject_toml_filename in [
+        *mra.run(["git", "ls-files", "pyproject.toml"], stdout=subprocess.PIPE).stdout.split("\n"),
+        *mra.run(["git", "ls-files", "**/pyproject.toml"], stdout=subprocess.PIPE).stdout.split("\n"),
+    ]:
+        if pyproject_toml_filename:
+            with mra.Edit(pyproject_toml_filename) as pyproject_toml:
+                # Poetry
+                pyproject_toml.data = re.sub('python = ">=3.8,', 'python = ">=3.9,', pyproject_toml.data)
+                # Black
+                pyproject_toml.data = re.sub(
+                    re.escape("target-version = ['py38']"), 'target-version = ["py39"]', pyproject_toml.data
+                )
+                pyproject_toml.data = re.sub(
+                    re.escape('target-version = ["py38"]'), 'target-version = ["py39"]', pyproject_toml.data
+                )
+                # mypy
+                pyproject_toml.data = re.sub(
+                    "python_version = 3.8", "python_version = 3.9", pyproject_toml.data
+                )
+                # classifiers
+                pyproject_toml.data = re.sub(
+                    r' *"Programming Language :: Python :: 3.[0-9]+",\n', "", pyproject_toml.data
+                )
+    mra.run(["pre-commit", "run", "--all-files", "pyupgrade"], exit_on_error=False)
+    mra.run(["pre-commit", "run", "--all-files", "autoflake"], exit_on_error=False)
+
+
+#                pyproject_toml.data = re.sub(
+#                    '"Programming Language :: Python",',
+#                    """"Programming Language :: Python",
+#  "Programming Language :: Python :: 3.8",
+#  "Programming Language :: Python :: 3.9",
+#  "Programming Language :: Python :: 3.10",
+#  "Programming Language :: Python :: 3.11",""",
+#                    pyproject_toml.data,
+#                )
+
+
+if __name__ == "__main__":
+    mra.main(
+        _do,
+        # pull_request_on_stabilization_branches
+        # pull_request_title
+        # pull_request_body
+        # branch
+        # pull_request_branch_prefix
+        config={
+            "branch": "update-python",
+            "pull_request_title": "Use Python 3.9",
+            "pull_request_body": "",
+        },
+    )
