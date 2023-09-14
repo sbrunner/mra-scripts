@@ -76,8 +76,8 @@ if __name__ == "__main__":
         # branch
         # pull_request_branch_prefix
         config={
-            "branch": "update-python",
-            "pull_request_title": "Use Python 3.9",
+            "branch": "upgrade-python",
+            "pull_request_title": "Upgrade the use Python version to 3.9",
             "pull_request_body": "",
         },
     )
