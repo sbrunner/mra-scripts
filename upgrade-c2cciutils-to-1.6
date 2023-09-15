@@ -30,11 +30,11 @@ def _folder_scalar_string(value: list[str]) -> ruamel.yaml.scalarstring.FoldedSc
 
 def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
     new_data = []
-    for key in ["name", "on", "premissions", "env"]:
+    for key in ["name", "on", "permissions", "env"]:
         if key in workflow:
             new_data.append((key, workflow[key]))
 
-    new_data += [e for e in workflow.items() if e[0] not in ("name", "on", "premissions", "env", "jobs")]
+    new_data += [e for e in workflow.items() if e[0] not in ("name", "on", "permissions", "env", "jobs")]
 
     if "jobs" in workflow:
         new_data.append(("jobs", workflow["jobs"]))
@@ -49,7 +49,7 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
             None,
         ]
 
-    for key in ["on", "premissions", "env", "jobs"]:
+    for key in ["on", "permissions", "env", "jobs"]:
         workflow.data.ca.items[key] = [
             None,
             [ruamel.yaml.CommentToken("\n", ruamel.yaml.error.CommentMark(0), None)],
@@ -586,7 +586,7 @@ if (process.env.GITHUB_REF_TYPE == 'tag') {
         mra.run(["git", "add", ".github/run-changelog.mjs"])
 
         with mra.EditYAML(".github/workflows/main.yaml") as main:
-            main["premissions"] = {
+            main["permissions"] = {
                 "actions": "write",
                 "contents": "write",
             }
