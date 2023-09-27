@@ -415,6 +415,23 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                 renovate_config.data,
                 1,
             )
+            renovate_config.data = re.sub(
+                re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
+                r"fileMatch: ['^\\\\.pre-commit-config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(r"fileMatch: ['^ci/config\\\\.yaml$'],"),
+                r"fileMatch: ['^ci/config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(
+                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
+                ),
+                r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
+                renovate_config.data,
+            )
 
     c2cciutils_version = version.parse("1.6.0")
     if os.path.exists("ci/config.yaml"):
@@ -544,12 +561,40 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                 },
                 True,
             )
+            schemas = []
+            for files_ in ("*.schema.json", "schema.json", "schema-*.json"):
+                schemas += [
+                    f
+                    for f in mra.run(["git", "ls-files", files_], stdout=subprocess.PIPE).stdout.split("\n")
+                    if f
+                ]
+                schemas += [
+                    f
+                    for f in mra.run(
+                        ["git", "ls-files", f"**/{files_}"], stdout=subprocess.PIPE
+                    ).stdout.split("\n")
+                    if f
+                ]
+
+            if schemas:
+                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "master")
+                pre_commit_config.add_hook(
+                    "https://github.com/mheap/json-schema-spell-checker",
+                    {
+                        "id": "json-schema-spell-checker",
+                        "files": pre_commit_config.create_files_regex([re.escape(f) for f in schemas]),
+                        "args": [
+                            "--fields=description,title",
+                            "--spelling=.github/spell-ignore-words.txt",
+                        ],
+                    },
+                )
 
     if os.path.exists(".github/renovate.json5"):
         with mra.EditRenovateConfig() as renovate_config:
             renovate_config.add_regex_manager(
                 {
-                    "fileMatch": ["^ci/config\\\\.yaml$"],
+                    "fileMatch": [r"^ci/config\.yaml$"],
                     "matchStrings": [
                         r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*",
                     ],

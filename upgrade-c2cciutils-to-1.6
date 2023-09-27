@@ -415,6 +415,23 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                 renovate_config.data,
                 1,
             )
+            renovate_config.data = re.sub(
+                re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
+                r"fileMatch: ['^\\\\.pre-commit-config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(r"fileMatch: ['^ci/config\\\\.yaml$'],"),
+                r"fileMatch: ['^ci/config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(
+                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
+                ),
+                r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
+                renovate_config.data,
+            )
 
     c2cciutils_version = version.parse("1.6.0")
     if os.path.exists("ci/config.yaml"):
@@ -549,7 +566,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
         with mra.EditRenovateConfig() as renovate_config:
             renovate_config.add_regex_manager(
                 {
-                    "fileMatch": ["^ci/config\\\\.yaml$"],
+                    "fileMatch": [r"^ci/config\\.yaml$"],
                     "matchStrings": [
                         r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*",
                     ],
