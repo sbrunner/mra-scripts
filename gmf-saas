@@ -1,0 +1,44 @@
+#!/bin/env python3
+
+import argparse
+
+MEMORY = {
+    "GeoMapFish": (0.45, 0.45),
+    "MapServer": (0.8, 0),
+    "QGISServer": (1.5, 0),
+}
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("""Calculate the memory needed for a GeoMapFish instance.""")
+    parser.add_argument("--geomapfish", "--gmf", action="store_true", help="Require GeoMapFish.")
+    parser.add_argument("--mapserver", "--ms", action="store_true", help="Require MapServer.")
+    parser.add_argument("--qgisserver", "--qs", action="store_true", help="Require QGISServer.")
+    parser.add_argument("--blue-green", "--bg", action="store_true", help="Use blue-green deployment.")
+    parser.add_argument("--pod", type=int, default=2, help="Number of pods.")
+    parser.add_argument(
+        "--strategy", default="RollingUpdate", help="Deployment strategy, can be RollingUpdate or Recreate."
+    )
+    args = parser.parse_args()
+
+    requires_memory = 0
+    requires_temporary_memory = 0
+
+    def add_memory(premanent, temporary):
+        global requires_memory, requires_temporary_memory
+
+        requires_memory += premanent * args.pod
+        requires_temporary_memory = max(requires_temporary_memory, temporary)
+        if args.strategy == "RollingUpdate":
+            requires_temporary_memory = max(requires_temporary_memory, premanent)
+
+    if args.geomapfish:
+        add_memory(*MEMORY["GeoMapFish"])
+    if args.qgisserver:
+        add_memory(*MEMORY["QGISServer"])
+    if args.mapserver:
+        add_memory(*MEMORY["MapServer"])
+
+    if args.blue_green:
+        requires_memory *= 2
+
+    print(f"{requires_memory+requires_temporary_memory}Gi")
