@@ -18,17 +18,6 @@ from packaging import version
 # input()
 
 
-def _folder_scalar_string(value: list[str]) -> ruamel.yaml.scalarstring.FoldedScalarString:
-    result = ruamel.yaml.scalarstring.FoldedScalarString(" ".join(value))
-    result.fold_pos = []
-    pos = -1
-    for line in value:
-        if pos >= 0:
-            result.fold_pos.append(pos)
-        pos += len(line) + 1
-    return result
-
-
 def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
     new_data = []
     for key in ["name", "on", "permissions", "env"]:
@@ -201,7 +190,7 @@ def _do() -> None:
                 },
                 {
                     "name": "Generate changelog",
-                    "run": _folder_scalar_string(
+                    "run": mra_yaml.folder_scalar_string(
                         [
                             "docker run --env=AEON_AUTOMATION_GH_TOKEN --rm --volume=$(pwd)/.cache:/cache aeonphp/automation",
                             "changelog:generate:all",
