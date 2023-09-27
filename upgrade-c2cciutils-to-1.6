@@ -153,6 +153,10 @@ def _do() -> None:
             create_release_step = (
                 [
                     {
+                        "uses": "actions/checkout@v4",
+                        "if": "github.event_name == 'push' && github.ref_type == 'tag'",
+                    },
+                    {
                         "name": "Create release",
                         "run": ruamel.yaml.scalarstring.LiteralScalarString(
                             "\n".join(
@@ -172,7 +176,7 @@ def _do() -> None:
                                 ],
                             }
                         ),
-                    }
+                    },
                 ]
                 if not is_helm
                 else []
