@@ -525,7 +525,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                                 " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"
                             ],
                         },
-                        r"'^.pre-commit-config\.yaml$'",
+                        r"^.pre-commit-config\\.yaml$",
                     )
                     renovate_config.add_regex_manager(
                         {
@@ -536,7 +536,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                             "datasourceTemplate": "repology",
                             "versioningTemplate": "loose",
                         },
-                        r"'^ci/dpkg-versions\.yaml$'",
+                        r"^ci/dpkg-versions\\.yaml$",
                     )
 
     if os.path.exists(".pre-commit-config.yaml"):
