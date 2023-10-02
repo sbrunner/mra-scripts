@@ -133,6 +133,39 @@ def _do() -> None:
                         },
                     )
 
+    c2cciutils_version = version.parse("1.6.0")
+    if os.path.exists("ci/config.yaml"):
+        with mra.Edit("ci/config.yaml") as ci_config:
+            data = ci_config.data.split("\n")
+            if ci_config.data.startswith(
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
+            ):
+                data = data[1:]
+
+            while data and not data[0].strip():
+                data = data[1:]
+
+            c2cciutils_version_str = "1.6"
+            if os.path.exists("ci/requirements.txt"):
+                with mra.Edit("ci/requirements.txt") as requirements_txt:
+                    requirement = [
+                        r
+                        for r in requirements_txt.data.split("\n")
+                        if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
+                    ]
+                    if len(requirement) == 1:
+                        c2cciutils_version_str = requirement[0].split("==")[1]
+                        c2cciutils_version = version.parse(c2cciutils_version_str)
+
+            data = [
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
+                f"c2cciutils/{c2cciutils_version}/c2cciutils/schema.json",
+                "",
+                *data,
+            ]
+
+            ci_config.data = "\n".join(data)
+
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists("CHANGELOG.md"):
@@ -342,10 +375,17 @@ def _do() -> None:
                 publish_index = -1
 
                 for index, step in enumerate(job["steps"]):
-                    if step.get("run", "") == "c2cciutils-checks":
-                        if not gopass:
-                            env = step.setdefault("env", {})
-                            env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+                    if c2cciutils_version >= version.parse("1.6.0"):
+                        if step.get("run", "") == "c2cciutils-checks":
+                            step["name"] = "Print environment information"
+                            step["run"] = "c2cciutils-env"
+                            if "env" in step:
+                                del step["env"]
+                    else:
+                        if step.get("run", "") == "c2cciutils-checks":
+                            if not gopass:
+                                env = step.setdefault("env", {})
+                                env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
                     if "docker login" in step.get("run", ""):
                         has_docker_login = True
@@ -432,39 +472,6 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                 r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
                 renovate_config.data,
             )
-
-    c2cciutils_version = version.parse("1.6.0")
-    if os.path.exists("ci/config.yaml"):
-        with mra.Edit("ci/config.yaml") as ci_config:
-            data = ci_config.data.split("\n")
-            if ci_config.data.startswith(
-                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
-            ):
-                data = data[1:]
-
-            while data and not data[0].strip():
-                data = data[1:]
-
-            c2cciutils_version_str = "1.6"
-            if os.path.exists("ci/requirements.txt"):
-                with mra.Edit("ci/requirements.txt") as requirements_txt:
-                    requirement = [
-                        r
-                        for r in requirements_txt.data.split("\n")
-                        if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
-                    ]
-                    if len(requirement) == 1:
-                        c2cciutils_version_str = requirement[0].split("==")[1]
-                        c2cciutils_version = version.parse(c2cciutils_version_str)
-
-            data = [
-                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
-                f"c2cciutils/{c2cciutils_version}/c2cciutils/schema.json",
-                "",
-                *data,
-            ]
-
-            ci_config.data = "\n".join(data)
 
     if c2cciutils_version >= version.parse("1.6.0"):
         if os.path.exists("ci/config.yaml"):
