@@ -8,6 +8,7 @@ import multi_repo_automation as mra
 import multi_repo_automation.commented_yaml as mra_yaml
 import ruamel.yaml.comments
 import ruamel.yaml.scalarstring
+import yaml as py_yaml
 from packaging import version
 
 # if os.path.exists(".github/renovate.json5"):
@@ -48,9 +49,7 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
         ]
 
 
-def _do() -> None:
-    repo = mra.get_repo_config()
-
+def _create_labels(create_pull_request_welcome) -> None:
     mra.gh(
         "label",
         "create",
@@ -59,7 +58,7 @@ def _do() -> None:
         "--color=0075ca",
         "--description=Update the dependencies",
     )
-    if "pull-request-welcome" not in repo.get("types", []):
+    if create_pull_request_welcome:
         mra.gh(
             "label",
             "create",
@@ -69,8 +68,30 @@ def _do() -> None:
             "--description=A pull request is welcome to fix this issue",
         )
 
-    is_helm = os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml")
 
+def _set_schema_config(c2cciutils_version):
+    if os.path.exists("ci/config.yaml"):
+        with mra.Edit("ci/config.yaml") as ci_config:
+            data = ci_config.data.split("\n")
+            if ci_config.data.startswith(
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
+            ):
+                data = data[1:]
+
+            while data and not data[0].strip():
+                data = data[1:]
+
+            data = [
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
+                f"c2cciutils/{c2cciutils_version}/c2cciutils/schema.json",
+                "",
+                *data,
+            ]
+
+            ci_config.data = "\n".join(data)
+
+
+def _upgrade_ubuntu() -> None:
     for workflow_file in mra.run(
         ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
     ).stdout.split("\n"):
@@ -80,10 +101,184 @@ def _do() -> None:
                     if job.get("runs-on", "").startswith("ubuntu-"):
                         job["runs-on"] = "ubuntu-22.04"
 
-    gopass = "no-gopass" not in repo.get("types", [])
-    token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
+
+def _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi, is_docker, is_helm) -> None:
+    if os.path.exists(".github/workflows/main.yaml"):
+        with mra.EditYAML(".github/workflows/main.yaml") as yaml:
+            env = yaml.setdefault("env", {})
+            if "HAS_SECRETS" not in env:
+                env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
+
+                if hasattr(env, "ca"):
+                    env.ca.items.clear()
+                    env.ca.items["HAS_SECRETS"] = [
+                        None,
+                        None,
+                        ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                        None,
+                    ]
+
+            for job in yaml["jobs"].values():
+                has_pip_login = False
+                has_docker_login = False
+                publish_index = -1
+
+                for index, step in enumerate(job["steps"]):
+                    if c2cciutils_version >= version.parse("1.6.0"):
+                        if step.get("run", "") == "c2cciutils-checks":
+                            step["name"] = "Print environment information"
+                            step["run"] = "c2cciutils-env"
+                            value = None
+                            if "env" in step:
+                                if step["env"].ca.items:
+                                    value = list(step["env"].ca.items.values())[-1][2].value
+                                del step["env"]
+                            job["steps"].ca.items[index] = [
+                                None,
+                                None,
+                                [
+                                    ruamel.yaml.CommentToken(
+                                        value or "\n\n", ruamel.yaml.error.CommentMark(0), None
+                                    )
+                                ],
+                                None,
+                            ]
+                    else:
+                        if step.get("run", "") == "c2cciutils-checks":
+                            if not gopass:
+                                env = step.setdefault("env", {})
+                                env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+
+                    if "docker login" in step.get("run", ""):
+                        has_docker_login = True
+                    if ".pypirc" in step.get("run", ""):
+                        has_pip_login = True
+                        if step.get("name", "") == "Init pypi":
+                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                                """echo "[pypi]" > ~/.pypirc
+echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+                            )
+
+                    if "c2cciutils-publish" in step.get("run", ""):
+                        publish_index = index
+                        if not gopass:
+                            step.setdefault("env", {}).update(
+                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                            )
+
+                if not has_pip_login and not gopass and is_pypi and publish_index >= 0:
+                    if is_python:
+                        job["steps"] = (
+                            job["steps"][:publish_index]
+                            + [
+                                {
+                                    "name": "Init pypi",
+                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
+                                        """echo "[pypi]" > ~/.pypirc
+echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+                                    ),
+                                }
+                            ]
+                            + job["steps"][publish_index:]
+                        )
+                if not has_docker_login and not gopass and is_docker and publish_index >= 0:
+                    job["steps"] = (
+                        job["steps"][:publish_index]
+                        + [
+                            {
+                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
+                            }
+                        ]
+                        + job["steps"][publish_index:]
+                    )
+
+            if os.path.exists(".github/run-changelog.mjs"):
+                os.remove(".github/run-changelog.mjs")
+
+            if is_helm:
+                yaml["permissions"] = {
+                    "actions": "write",
+                    "contents": "write",
+                }
+
+                steps = yaml["jobs"]["main"]["steps"]
+                present = False
+                for step in steps:
+                    if step.get("run") == "npm install @octokit/action":
+                        present = True
+                        break
+
+                if not present:
+                    steps.append(
+                        {
+                            "name": "Trigger changelog workflow",
+                            "uses": "actions/github-script@v6",
+                            "with": {
+                                "script": mra_yaml.folder_scalar_string(
+                                    [
+                                        "if (process.env.GITHUB_REF_TYPE == 'tag') {",
+                                        "    console.log('Trigger changelog');",
+                                        "    await github.rest.repos.createDispatchEvent({",
+                                        "        owner: 'camptocamp',",
+                                        "        repo: 'helm-mutualize',",
+                                        "        event_type: 'changelog',",
+                                        "    });",
+                                        "}",
+                                    ]
+                                )
+                            },
+                        }
+                    )
+                    steps.ca.items[len(steps) - 1] = [
+                        None,
+                        [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
+                        None,
+                        None,
+                    ]
+
+            _canonicalize_workflow(yaml)
+
+
+def _update_audit_workflow(gopass, token) -> None:
     if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
+            if gopass:
+                gopass_init = False
+                checkout_index = -1
+                job_config = None
+                for job in yaml["jobs"].values():
+                    for index, step in enumerate(job["steps"]):
+                        if step.get("uses", "").startswith("actions/checkout@"):
+                            checkout_index = index
+                            job_config = job
+                        if step.get("uses", "").startswith("camptocamp/initialise-gopass-summon-action@"):
+                            gopass_init = True
+                if not gopass_init:
+                    job_config["steps"].insert(
+                        checkout_index + 1,
+                        {
+                            "uses": "camptocamp/initialise-gopass-summon-action@v2",
+                            "with": {
+                                "ci-gpg-private-key": "${{secrets.CI_GPG_PRIVATE_KEY}}",
+                                "github-gopass-ci-token": token,
+                            },
+                        },
+                    )
+                    job_config["steps"].ca.items[checkout_index] = [
+                        None,
+                        None,
+                        [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
+                        None,
+                    ]
+                    job_config["steps"].ca.items[checkout_index + 1] = [
+                        None,
+                        None,
+                        [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
+                        None,
+                    ]
+
             for job in yaml["jobs"].values():
                 checkout_step = -999
                 missing_git_config = False
@@ -122,39 +317,10 @@ def _do() -> None:
                         },
                     )
 
-    c2cciutils_version = version.parse("1.6.0")
-    if os.path.exists("ci/config.yaml"):
-        with mra.Edit("ci/config.yaml") as ci_config:
-            data = ci_config.data.split("\n")
-            if ci_config.data.startswith(
-                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
-            ):
-                data = data[1:]
+            _canonicalize_workflow(yaml)
 
-            while data and not data[0].strip():
-                data = data[1:]
 
-            c2cciutils_version_str = "1.6"
-            if os.path.exists("ci/requirements.txt"):
-                with mra.Edit("ci/requirements.txt") as requirements_txt:
-                    requirement = [
-                        r
-                        for r in requirements_txt.data.split("\n")
-                        if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
-                    ]
-                    if len(requirement) == 1:
-                        c2cciutils_version_str = requirement[0].split("==")[1]
-                        c2cciutils_version = version.parse(c2cciutils_version_str)
-
-            data = [
-                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
-                f"c2cciutils/{c2cciutils_version}/c2cciutils/schema.json",
-                "",
-                *data,
-            ]
-
-            ci_config.data = "\n".join(data)
-
+def _update_changelog_workflow(token, is_helm) -> None:
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists("CHANGELOG.md"):
@@ -251,6 +417,8 @@ def _do() -> None:
 
             _canonicalize_workflow(yaml)
 
+
+def _update_clean_workflow(gopass) -> None:
     if os.path.exists(".github/workflows/clean.yaml"):
         with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
             for job in yaml["jobs"].values():
@@ -265,6 +433,10 @@ def _do() -> None:
                                 }
                             )
 
+            _canonicalize_workflow(yaml)
+
+
+def _update_delete_old_workflow_run_workflow(token) -> None:
     if os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
         with mra.EditYAML(".github/workflows/delete-old-workflow-run.yaml") as yaml:
             for job in yaml["jobs"].values():
@@ -273,6 +445,10 @@ def _do() -> None:
                         step["name"] = "Delete old workflow runs"
                         step.setdefault("env", {})["GITHUB_TOKEN"] = token
 
+            _canonicalize_workflow(yaml)
+
+
+def _update_dependency_auto_review_workflow(token) -> None:
     if os.path.exists(".github/workflows/dependabot-auto-merge.yaml"):
         mra.run(
             [
@@ -300,6 +476,10 @@ def _do() -> None:
                         step["name"] = "Auto reviews updates"
                         step.setdefault("with", {}).update({"GITHUB_TOKEN": token, "AUTHOR": "renovate[bot]"})
 
+            _canonicalize_workflow(yaml)
+
+
+def _update_pull_request_checks_workflow(token) -> None:
     if os.path.exists(".github/workflows/pr-checks.yaml"):
         with mra.EditYAML(".github/workflows/pr-checks.yaml") as yaml:
             if "attrs" not in yaml["jobs"]["build"]["steps"][0].get("run", ""):
@@ -323,6 +503,10 @@ def _do() -> None:
                             }
                         )
 
+            _canonicalize_workflow(yaml)
+
+
+def _update_backport_workflow(token) -> None:
     if os.path.exists(".github/workflows/backport.yaml"):
         with mra.EditYAML(".github/workflows/backport.yaml") as yaml:
             for job in yaml["jobs"].values():
@@ -330,154 +514,84 @@ def _do() -> None:
                     if step.get("uses", "") == "camptocamp/backport-action@master":
                         step.setdefault("with", {})["token"] = token
 
+            _canonicalize_workflow(yaml)
+
+
+def _update_rebuild_workflow(gopass, token) -> None:
     if os.path.exists(".github/workflows/rebuild.yaml"):
         with mra.EditYAML(".github/workflows/rebuild.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
-                    if c2cciutils_version >= version.parse("1.6.0"):
-                        if step.get("run", "") == "c2cciutils-checks":
-                            step["name"] = "Print environment information"
-                            step["run"] = "c2cciutils-env"
-                            if "env" in step:
-                                del step["env"]
-                    else:
-                        if step.get("run", "") == "c2cciutils-checks":
-                            if not gopass:
-                                env = step.setdefault("env", {})
-                                env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
-
-                    if "c2cciutils-publish" in step.get("run", ""):
-                        if not gopass:
-                            step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
-                            )
-
-    if os.path.exists(".github/workflows/main.yaml"):
-        with mra.EditYAML(".github/workflows/main.yaml") as yaml:
-            env = yaml.setdefault("env", {})
-            if "HAS_SECRETS" not in env:
-                env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
-
-                if hasattr(env, "ca"):
-                    env.ca.items.clear()
-                    env.ca.items["HAS_SECRETS"] = [
-                        None,
-                        None,
-                        ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
-                        None,
-                    ]
-
-            for job in yaml["jobs"].values():
-                has_pip_login = False
-                has_docker_login = False
-                publish_index = -1
-
-                for index, step in enumerate(job["steps"]):
                     if step.get("run", "") == "c2cciutils-checks":
                         if not gopass:
                             env = step.setdefault("env", {})
                             env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
-                    if "docker login" in step.get("run", ""):
-                        has_docker_login = True
-                    if ".pypirc" in step.get("run", ""):
-                        has_pip_login = True
-                        if step.get("name", "") == "Init pypi":
-                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                                """echo "[pypi]" > ~/.pypirc
-echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
-echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
-                            )
-
                     if "c2cciutils-publish" in step.get("run", ""):
-                        publish_index = index
                         if not gopass:
                             step.setdefault("env", {}).update(
                                 {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
                             )
 
-                if (
-                    not has_pip_login
-                    and not gopass
-                    and os.path.exists("pyproject.toml")
-                    and "no-pypi" not in repo.get("type", [])
-                    and publish_index >= 0
-                ):
-                    with mra.EditTOML("pyproject.toml") as pyproject:
-                        is_python = "project" in pyproject.data or "build-system" in pyproject.data
+            _canonicalize_workflow(yaml)
 
-                    if is_python:
-                        job["steps"] = (
-                            job["steps"][:publish_index]
-                            + [
-                                {
-                                    "name": "Init pypi",
-                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                                        """echo "[pypi]" > ~/.pypirc
-echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
-echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
-                                    ),
-                                }
-                            ]
-                            + job["steps"][publish_index:]
-                        )
-                if (
-                    not has_docker_login
-                    and not gopass
-                    and os.path.exists("Dockerfile")
-                    and "no-docker" not in repo.get("type", [])
-                    and publish_index >= 0
-                ):
-                    job["steps"] = (
-                        job["steps"][:publish_index]
-                        + [
-                            {
-                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                            }
-                        ]
-                        + job["steps"][publish_index:]
+
+def _update_pyproject_toml() -> None:
+    """
+    Add or update the Poetry extensions to the pyproject.toml file.
+    """
+
+    for pyproject_filename in ("pyproject.toml", "app/pyproject.toml", "api/pyproject.toml"):
+        if os.path.exists(pyproject_filename):
+            with mra.EditTOML(pyproject_filename) as pyproject:
+                if "requires" in pyproject.get("build-system", {}) and "python" in pyproject.get(
+                    "tool", {}
+                ).get("poetry", {}).get("dependencies", {}):
+                    for plugin in (
+                        "poetry-dynamic-versioning",
+                        "poetry-plugin-tweak-dependencies-version",
+                        "poetry-plugin-drop-python-upper-constraint",
+                    ):
+                        if plugin not in pyproject["build-system"]["requires"]:
+                            pyproject.data["build-system"]["requires"].append(plugin)
+                    if os.path.exists("ci/requirements.txt"):
+                        with mra.Edit("ci/requirements.txt") as requirements_txt:
+                            for plugin, plugin_version in (
+                                ("poetry-dynamic-versioning", "1.1.0"),
+                                ("poetry-plugin-export", "1.5.0"),
+                                ("poetry-plugin-tweak-dependencies-version", "1.5.1"),
+                            ):
+                                if f"{plugin}==" not in requirements_txt.data:
+                                    requirements_txt.data += f"{plugin}=={plugin_version}\n"
+
+                    poetry_dynamic_versioning = pyproject.setdefault("tool", {}).setdefault(
+                        "poetry-dynamic-versioning", {}
                     )
+                    poetry_dynamic_versioning.setdefault("enable", True)
+                    poetry_dynamic_versioning.setdefault("vcs", "git")
+                    poetry_dynamic_versioning.setdefault("pattern", "^(?P<base>\\d+(\\.\\d+)*)")
+                    poetry_dynamic_versioning[
+                        "format-jinja"
+                    ] = """
+{%- if env.get("VERSION_TYPE") == "version_branch" -%}
+{{serialize_pep440(bump_version(base, 1 if env.get("IS_MASTER") == "TRUE" else 2), dev=distance)}}
+{%- elif distance == 0 -%}
+{{serialize_pep440(base)}}
+{%- else -%}
+{{serialize_pep440(bump_version(base), dev=distance)}}
+{%- endif -%}
+"""
+                    poetry_plugin_tweak_dependencies_version = pyproject.setdefault("tool", {}).setdefault(
+                        "poetry-plugin-tweak-dependencies-version", {}
+                    )
+                    poetry_plugin_tweak_dependencies_version.setdefault("default", "present")
 
-    if os.path.exists(".github/renovate.json5"):
-        with mra.Edit(".github/renovate.json5") as renovate_config:
-            renovate_config.data = re.sub(
-                "schedule: '.*'",
-                "schedule: 'after 5pm on the first day of the month'",
-                renovate_config.data,
-                1,
-            )
-            renovate_config.data = re.sub(
-                re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
-                r"fileMatch: ['^\\\\.pre-commit-config\\\\.yaml$'],",
-                renovate_config.data,
-            )
-            renovate_config.data = re.sub(
-                re.escape(r"fileMatch: ['^ci/config\\\\.yaml$'],"),
-                r"fileMatch: ['^ci/config\\\\.yaml$'],",
-                renovate_config.data,
-            )
-            renovate_config.data = re.sub(
-                re.escape(
-                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
-                ),
-                r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
-                renovate_config.data,
-            )
 
+def _update_renovate_config(c2cciutils_version, is_docker) -> None:
     if c2cciutils_version >= version.parse("1.6.0"):
-        if os.path.exists("ci/config.yaml"):
-            with mra.EditYAML("ci/config.yaml") as config:
-                if "checks" in config:
-                    del config["checks"]
-
-        if os.path.exists("Dockerfile"):
-            if not os.path.exists("ci/dpkg-versions.yaml"):
-                with mra.EditYAML("ci/dpkg-versions.yaml") as edit:
-                    edit.data = {}
-
-            if not os.path.exists(".github/renovate.json5"):
-                with mra.Edit(".github/renovate.json5") as renovate_config:
-                    renovate_config.data = """{
+        if not os.path.exists(".github/renovate.json5"):
+            with mra.Edit(".github/renovate.json5") as renovate_config:
+                renovate_config.data = """{
     extends: ['config:base'],
     timezone: 'Europe/Zurich',
     schedule: 'after 5pm on the first day of the month',
@@ -518,36 +632,94 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
     ],
     }
     """
-            if os.path.exists(".github/renovate.json5"):
-                with mra.Edit(".github/renovate.json5") as renovate_config:
-                    renovate_config.data = re.sub(
-                        r"^ci/dpkg-versions.yaml$",
-                        r"^ci/dpkg-versions\\.yaml$",
-                        renovate_config.data,
-                    )
-                with mra.EditRenovateConfig() as renovate_config:
-                    renovate_config.add("'pre-commit': { enabled: true },", "'pre-commit'")
-                    renovate_config.add_regex_manager(
-                        {
-                            "fileMatch": [r"^.pre-commit-config\.yaml$"],
-                            "matchStrings": [
-                                " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"
-                            ],
-                        },
-                        r"^.pre-commit-config\\.yaml$",
-                    )
-                    renovate_config.add_regex_manager(
-                        {
-                            "fileMatch": [r"^ci/dpkg-versions\.yaml$"],
-                            "matchStrings": [
-                                r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"
-                            ],
-                            "datasourceTemplate": "repology",
-                            "versioningTemplate": "loose",
-                        },
-                        r"^ci/dpkg-versions\\.yaml$",
-                    )
+    if os.path.exists(".github/renovate.json5"):
+        with mra.Edit(".github/renovate.json5") as renovate_config:
+            renovate_config.data = re.sub(
+                r"^ci/dpkg-versions.yaml$",
+                r"^ci/dpkg-versions\\.yaml$",
+                renovate_config.data,
+            )
+        with mra.EditRenovateConfig() as renovate_config:
+            renovate_config.data = re.sub(
+                "schedule: '.*'",
+                "schedule: 'after 5pm on the first day of the month'",
+                renovate_config.data,
+                1,
+            )
+            renovate_config.data = re.sub(
+                re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
+                r"fileMatch: ['^\\\\.pre-commit-config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(r"fileMatch: ['^ci/config\\\\.yaml$'],"),
+                r"fileMatch: ['^ci/config\\\\.yaml$'],",
+                renovate_config.data,
+            )
+            renovate_config.data = re.sub(
+                re.escape(
+                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
+                ),
+                r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
+                renovate_config.data,
+            )
+            if os.path.exists(".pre-commit-config.yaml"):
+                renovate_config.add("'pre-commit': { enabled: true },", "'pre-commit'")
+                renovate_config.add_regex_manager(
+                    {
+                        "fileMatch": [r"^.pre-commit-config\.yaml$"],
+                        "matchStrings": [
+                            " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"
+                        ],
+                    },
+                    r"^.pre-commit-config\\.yaml$",
+                )
+            if is_docker:
+                renovate_config.add_regex_manager(
+                    {
+                        "fileMatch": [r"^ci/dpkg-versions\.yaml$"],
+                        "matchStrings": [
+                            r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"
+                        ],
+                        "datasourceTemplate": "repology",
+                        "versioningTemplate": "loose",
+                    },
+                    r"^ci/dpkg-versions\\.yaml$",
+                )
+            renovate_config.add_regex_manager(
+                {
+                    "fileMatch": [r"^ci/config\.yaml$"],
+                    "matchStrings": [
+                        r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*",
+                    ],
+                    "datasourceTemplate": "github-tags",
+                },
+                r"https://raw\\.githubusercontent\\.com/(?<depName>[^\\s]+)/(?<currentValue>",
+            )
+            renovate_config.add_package_rule(
+                {
+                    "matchPackageNames": ["shellcheck-py/shellcheck-py"],
+                    "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)$",
+                },
+                "shellcheck-py/shellcheck-py",
+            )
 
+
+def _update_config(has_config, is_docker) -> None:
+    if has_config:
+        with mra.EditYAML("ci/config.yaml") as config:
+            if "checks" in config:
+                del config["checks"]
+
+    if is_docker:
+        if not os.path.exists("ci/dpkg-versions.yaml"):
+            with open("ci/dpkg-versions.yaml", "w", encoding="utf-8"):
+                pass
+            with mra.EditYAML("ci/dpkg-versions.yaml") as edit:
+                edit.data = {}
+
+
+def _update_pre_commit_config() -> None:
     if os.path.exists(".pre-commit-config.yaml"):
         with mra.EditPreCommitConfig() as pre_commit_config:
             pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
@@ -588,84 +760,65 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                     },
                 )
 
-    if os.path.exists(".github/renovate.json5"):
-        with mra.EditRenovateConfig() as renovate_config:
-            renovate_config.add_regex_manager(
-                {
-                    "fileMatch": [r"^ci/config\.yaml$"],
-                    "matchStrings": [
-                        r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*",
-                    ],
-                    "datasourceTemplate": "github-tags",
-                },
-                r"https://raw\\.githubusercontent\\.com/(?<depName>[^\\s]+)/(?<currentValue>",
-            )
-            renovate_config.add_package_rule(
-                {
-                    "matchPackageNames": ["shellcheck-py/shellcheck-py"],
-                    "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)$",
-                },
-                "shellcheck-py/shellcheck-py",
-            )
 
-    if is_helm:
-        with open(".github/run-changelog.mjs", "w", encoding="utf-8") as run_changelog_file:
-            run_changelog_file.write(
-                """import { Octokit } from '@octokit/action';
+def _do() -> None:
+    repo = mra.get_repo_config()
+    upgrade_config = {}
+    if os.path.exists(".github/upgrade-config.yaml"):
+        with open(".github/upgrade-config.yaml", encoding="utf-8") as f:
+            upgrade_config = py_yaml.load(f.read(), Loader=py_yaml.SafeLoader)
 
-if (process.env.GITHUB_REF_TYPE == 'tag') {
-    console.log('Run changelog');
+    is_helm = os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml")
+    # will be: repo starts with 'camptocamp/'
+    gopass = "no-gopass" not in repo.get("types", [])
+    token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
 
-    const octokit = new Octokit();
+    has_config = False
+    if os.path.exists("ci/config.yaml"):
+        with open("ci/config.yaml", encoding="utf-8") as f:
+            has_config = py_yaml.load(f.read(), Loader=py_yaml.SafeLoader)
 
-    await octokit.rest.repos.createDispatchEvent({
-        owner: 'camptocamp',
-        repo: 'helm-mutualize',
-        event_type: 'changelog',
-    });
-}
-"""
-            )
-        mra.run(["chmod", "-x", ".github/run-changelog.mjs"])
-        mra.run(["git", "add", ".github/run-changelog.mjs"])
+    c2cciutils_version = version.parse("1.6.0")
+    if os.path.exists("ci/requirements.txt"):
+        with mra.Edit("ci/requirements.txt") as requirements_txt:
+            requirement = [
+                r
+                for r in requirements_txt.data.split("\n")
+                if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
+            ]
+            if len(requirement) == 1:
+                c2cciutils_version_str = requirement[0].split("==")[1]
+                c2cciutils_version = version.parse(c2cciutils_version_str)
 
-        with mra.EditYAML(".github/workflows/main.yaml") as main:
-            main["permissions"] = {
-                "actions": "write",
-                "contents": "write",
-            }
+    is_python = False
+    for pyproject_filename in ("pyproject.toml", "app/pyproject.toml", "api/pyproject.toml"):
+        if os.path.exists(pyproject_filename):
+            with mra.EditTOML(pyproject_filename) as pyproject:
+                is_python = "project" in pyproject or "build-system" in pyproject
 
-            steps = main["jobs"]["main"]["steps"]
-            present = False
-            for step in steps:
-                if step.get("run") == "npm install @octokit/action":
-                    present = True
-                    break
+    is_pypi = is_python and "no-pypi" not in repo.get("type", [])
+    is_docker = (
+        os.path.exists("Dockerfile") or os.path.exists("app/Dockerfile") or os.path.exists("api/Dockerfile")
+    ) and "no-docker" not in repo.get("type", [])
 
-            if not present:
-                steps.append(
-                    {
-                        "name": "Install octokit/action",
-                        "run": "npm install @octokit/action",
-                    },
-                )
-                steps.append(
-                    {
-                        "name": "Run changelog",
-                        "run": "node .github/run-changelog.mjs",
-                        "env": {
-                            "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
-                        },
-                    }
-                )
-                steps.ca.items[len(steps) - 2] = [
-                    None,
-                    [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
-                    None,
-                    None,
-                ]
-
-            _canonicalize_workflow(main)
+    _create_labels(
+        upgrade_config.get("pull-request-welcome", "pull-request-welcome" not in repo.get("types", []))
+    )
+    _set_schema_config(c2cciutils_version)
+    _upgrade_ubuntu()
+    _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi, is_docker, is_helm)
+    _update_audit_workflow(gopass, token)
+    _update_changelog_workflow(token, is_helm)
+    _update_clean_workflow(gopass)
+    _update_delete_old_workflow_run_workflow(token)
+    _update_dependency_auto_review_workflow(token)
+    _update_pull_request_checks_workflow(token)
+    _update_backport_workflow(token)
+    _update_rebuild_workflow(gopass, token)
+    _update_pyproject_toml()
+    _update_renovate_config(c2cciutils_version, is_docker)
+    _update_config(has_config, is_docker)
+    _update_pre_commit_config()
 
 
 if __name__ == "__main__":

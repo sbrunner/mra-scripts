@@ -347,7 +347,8 @@ def _do() -> None:
                 for step in job["steps"]:
                     if step.get("run", "") == "c2cciutils-checks":
                         if not gopass:
-                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+                            env = step.setdefault("env", {})
+                            env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
                     if "c2cciutils-publish" in step.get("run", ""):
                         if not gopass:
                             step.setdefault("env", {}).update(
@@ -379,8 +380,21 @@ def _do() -> None:
                         if step.get("run", "") == "c2cciutils-checks":
                             step["name"] = "Print environment information"
                             step["run"] = "c2cciutils-env"
+                            value = None
                             if "env" in step:
+                                if step["env"].ca.items:
+                                    value = list(step["env"].ca.items.values())[-1][2].value
                                 del step["env"]
+                            job["steps"].ca.items[index] = [
+                                None,
+                                None,
+                                [
+                                    ruamel.yaml.CommentToken(
+                                        value or "\n\n", ruamel.yaml.error.CommentMark(0), None
+                                    )
+                                ],
+                                None,
+                            ]
                     else:
                         if step.get("run", "") == "c2cciutils-checks":
                             if not gopass:
