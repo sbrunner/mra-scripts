@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 
+import glob
 import os
 import re
 import subprocess
+from typing import Any, NamedTuple
 
 import multi_repo_automation as mra
 import multi_repo_automation.commented_yaml as mra_yaml
@@ -17,6 +19,18 @@ from packaging import version
 # if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
 # mra.edit("file")
 # input()
+
+
+class TaskEnv(NamedTuple):
+    c2cciutils_version: version.Version
+    is_python: bool
+    is_pypi: bool
+    is_docker: bool
+    is_helm: bool
+    has_config: bool
+    gopass: bool
+    token: str
+    tags: list[str]
 
 
 def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
@@ -49,7 +63,7 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
         ]
 
 
-def _create_labels(create_pull_request_welcome) -> None:
+def _create_labels(task_env: TaskEnv) -> None:
     mra.gh(
         "label",
         "create",
@@ -58,7 +72,7 @@ def _create_labels(create_pull_request_welcome) -> None:
         "--color=0075ca",
         "--description=Update the dependencies",
     )
-    if create_pull_request_welcome:
+    if "pull-request-welcome" in task_env.tags:
         mra.gh(
             "label",
             "create",
@@ -69,7 +83,7 @@ def _create_labels(create_pull_request_welcome) -> None:
         )
 
 
-def _set_schema_config(c2cciutils_version):
+def _set_schema_config(task_env: TaskEnv):
     if os.path.exists("ci/config.yaml"):
         with mra.Edit("ci/config.yaml") as ci_config:
             data = ci_config.data.split("\n")
@@ -83,7 +97,7 @@ def _set_schema_config(c2cciutils_version):
 
             data = [
                 "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/"
-                f"c2cciutils/{c2cciutils_version}/c2cciutils/schema.json",
+                f"c2cciutils/{task_env.c2cciutils_version}/c2cciutils/schema.json",
                 "",
                 *data,
             ]
@@ -91,7 +105,9 @@ def _set_schema_config(c2cciutils_version):
             ci_config.data = "\n".join(data)
 
 
-def _upgrade_ubuntu() -> None:
+def _upgrade_ubuntu(task_env: TaskEnv) -> None:
+    del task_env
+
     for workflow_file in mra.run(
         ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
     ).stdout.split("\n"):
@@ -102,7 +118,7 @@ def _upgrade_ubuntu() -> None:
                         job["runs-on"] = "ubuntu-22.04"
 
 
-def _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi, is_docker, is_helm) -> None:
+def _update_main_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/main.yaml"):
         with mra.EditYAML(".github/workflows/main.yaml") as yaml:
             env = yaml.setdefault("env", {})
@@ -124,7 +140,7 @@ def _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi,
                 publish_index = -1
 
                 for index, step in enumerate(job["steps"]):
-                    if c2cciutils_version >= version.parse("1.6.0"):
+                    if task_env.c2cciutils_version >= version.parse("1.6.0"):
                         if step.get("run", "") == "c2cciutils-checks":
                             step["name"] = "Print environment information"
                             step["run"] = "c2cciutils-env"
@@ -145,7 +161,7 @@ def _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi,
                             ]
                     else:
                         if step.get("run", "") == "c2cciutils-checks":
-                            if not gopass:
+                            if not task_env.gopass:
                                 env = step.setdefault("env", {})
                                 env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
@@ -162,13 +178,13 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
 
                     if "c2cciutils-publish" in step.get("run", ""):
                         publish_index = index
-                        if not gopass:
+                        if not task_env.gopass:
                             step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                                {"GITHUB_TOKEN": task_env.token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
                             )
 
-                if not has_pip_login and not gopass and is_pypi and publish_index >= 0:
-                    if is_python:
+                if not has_pip_login and not task_env.gopass and task_env.is_pypi and publish_index >= 0:
+                    if task_env.is_python:
                         job["steps"] = (
                             job["steps"][:publish_index]
                             + [
@@ -183,7 +199,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                             ]
                             + job["steps"][publish_index:]
                         )
-                if not has_docker_login and not gopass and is_docker and publish_index >= 0:
+                if not has_docker_login and not task_env.gopass and task_env.is_docker and publish_index >= 0:
                     job["steps"] = (
                         job["steps"][:publish_index]
                         + [
@@ -197,7 +213,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
             if os.path.exists(".github/run-changelog.mjs"):
                 os.remove(".github/run-changelog.mjs")
 
-            if is_helm:
+            if task_env.is_helm:
                 yaml["permissions"] = {
                     "actions": "write",
                     "contents": "write",
@@ -241,10 +257,10 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
             _canonicalize_workflow(yaml)
 
 
-def _update_audit_workflow(gopass, token) -> None:
+def _update_audit_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
-            if gopass:
+            if task_env.gopass:
                 gopass_init = False
                 checkout_index = -1
                 job_config = None
@@ -262,7 +278,7 @@ def _update_audit_workflow(gopass, token) -> None:
                             "uses": "camptocamp/initialise-gopass-summon-action@v2",
                             "with": {
                                 "ci-gpg-private-key": "${{secrets.CI_GPG_PRIVATE_KEY}}",
-                                "github-gopass-ci-token": token,
+                                "github-gopass-ci-token": task_env.token,
                             },
                         },
                     )
@@ -284,20 +300,20 @@ def _update_audit_workflow(gopass, token) -> None:
                 missing_git_config = False
                 for nb, step in enumerate(job["steps"]):
                     if step.get("uses", "").startswith("actions/checkout"):
-                        step.setdefault("with", {})["token"] = token
+                        step.setdefault("with", {})["token"] = task_env.token
                         checkout_step = nb
                     if nb == checkout_step + 1:
-                        if not step.get("run", "").startswith("git config ") and not gopass:
+                        if not step.get("run", "").startswith("git config ") and not task_env.gopass:
                             missing_git_config = True
                     if "c2cciutils-audit" in step.get("run", ""):
                         if "debug" in step["name"]:
                             step["name"] = "Audit Snyk debug"
                         else:
                             step["name"] = "Audit"
-                        if not gopass:
+                        if not task_env.gopass:
                             step.setdefault("env").update(
                                 {
-                                    "GITHUB_TOKEN": token,
+                                    "GITHUB_TOKEN": task_env.token,
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
                                 }
                             )
@@ -320,7 +336,7 @@ def _update_audit_workflow(gopass, token) -> None:
             _canonicalize_workflow(yaml)
 
 
-def _update_changelog_workflow(token, is_helm) -> None:
+def _update_changelog_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists("CHANGELOG.md"):
@@ -331,7 +347,7 @@ def _update_changelog_workflow(token, is_helm) -> None:
             if "push" in yaml["on"]:
                 del yaml["on"]["push"]
 
-            if is_helm:
+            if task_env.is_helm:
                 if "workflow_dispatch" in yaml["on"]:
                     del yaml["on"]["workflow_dispatch"]
                 yaml["on"]["repository_dispatch"] = {"types": ["changelog"]}
@@ -359,14 +375,14 @@ def _update_changelog_workflow(token, is_helm) -> None:
                         "env": mra_yaml.commented_map(
                             {
                                 "GH_TOKEN": [
-                                    token,
+                                    task_env.token,
                                     "\n\n",
                                 ],
                             }
                         ),
                     },
                 ]
-                if not is_helm
+                if not task_env.is_helm
                 else []
             )
             yaml.setdefault("jobs", {}).setdefault("changelog", {})["steps"] = [
@@ -403,7 +419,7 @@ def _update_changelog_workflow(token, is_helm) -> None:
                         ]
                     ),
                     "env": {
-                        "AEON_AUTOMATION_GH_TOKEN": token,
+                        "AEON_AUTOMATION_GH_TOKEN": task_env.token,
                     },
                 },
             ]
@@ -411,21 +427,21 @@ def _update_changelog_workflow(token, is_helm) -> None:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
                     if step.get("name", "") == "Create release":
-                        step.setdefault("env", {})["GH_TOKEN"] = token
+                        step.setdefault("env", {})["GH_TOKEN"] = task_env.token
                     if step.get("name", "") == "Generate changelog":
-                        step.setdefault("env", {})["AEON_AUTOMATION_GH_TOKEN"] = token
+                        step.setdefault("env", {})["AEON_AUTOMATION_GH_TOKEN"] = task_env.token
 
             _canonicalize_workflow(yaml)
 
 
-def _update_clean_workflow(gopass) -> None:
+def _update_clean_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/clean.yaml"):
         with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
                     if "c2cciutils-clean" in step.get("run", ""):
                         step["name"] = "Clean Docker hub tags"
-                        if not gopass:
+                        if not task_env.gopass:
                             step.setdefault("env", {}).update(
                                 {
                                     "DOCKERHUB_PASSWORD": "${{ secrets.DOCKER_PASSWORD }}",
@@ -436,50 +452,62 @@ def _update_clean_workflow(gopass) -> None:
             _canonicalize_workflow(yaml)
 
 
-def _update_delete_old_workflow_run_workflow(token) -> None:
+def _update_delete_old_workflow_run_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
         with mra.EditYAML(".github/workflows/delete-old-workflow-run.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
                     if step.get("uses", "").startswith("MajorScruffy/delete-old-workflow-runs"):
                         step["name"] = "Delete old workflow runs"
-                        step.setdefault("env", {})["GITHUB_TOKEN"] = token
+                        step.setdefault("env", {})["GITHUB_TOKEN"] = task_env.token
 
             _canonicalize_workflow(yaml)
 
 
-def _update_dependency_auto_review_workflow(token) -> None:
-    if os.path.exists(".github/workflows/dependabot-auto-merge.yaml"):
-        mra.run(
-            [
-                "git",
-                "mv",
-                ".github/workflows/dependabot-auto-merge.yaml",
-                ".github/workflows/dependency-update-review.yaml",
-            ]
-        )
-    if os.path.exists(".github/workflows/auto-review.yaml"):
-        mra.run(
-            [
-                "git",
-                "mv",
-                ".github/workflows/auto-review.yaml",
-                ".github/workflows/dependency-update-review.yaml",
-            ]
-        )
-    if os.path.exists(".github/workflows/dependency-update-review.yaml"):
-        with mra.EditYAML(".github/workflows/dependency-update-review.yaml") as yaml:
+def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
+    for file_ in (
+        ".github/workflows/dependabot-auto-merge.yaml",
+        ".github/workflows/auto-review.yaml",
+        ".github/workflows/dependency-update-review.yaml",
+    ):
+        if os.path.exists(file_):
+            mra.run(
+                [
+                    "git",
+                    "mv",
+                    file_,
+                    ".github/workflows/dependency-auto-review.yaml",
+                ]
+            )
+    if os.path.exists(".github/workflows/dependency-auto-review.yaml"):
+        with mra.EditYAML(".github/workflows/dependency-auto-review.yaml") as yaml:
+            yaml["on"] = {"pull_request": {"types": ["opened", "reopened"]}}
             for job in yaml["jobs"].values():
                 job["if"] = "github.event.pull_request.user.login == 'renovate[bot]'"
-                for step in job["steps"]:
-                    if step.get("uses", "").startswith("golfzaptw/action-auto-reviews-from-branches"):
-                        step["name"] = "Auto reviews updates"
-                        step.setdefault("with", {}).update({"GITHUB_TOKEN": token, "AUTHOR": "renovate[bot]"})
+                job["steps"] = [
+                    {
+                        "uses": "actions/github-script@v6",
+                        "with": {
+                            "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                                "\n".join(
+                                    [
+                                        "github.rest.pulls.createReview({",
+                                        "  owner: context.repo.owner,",
+                                        "  repo: context.repo.repo,",
+                                        "  pull_number: context.payload.pull_request.number,",
+                                        "  event: 'APPROVE',",
+                                        "})",
+                                    ]
+                                )
+                            )
+                        },
+                    }
+                ]
 
             _canonicalize_workflow(yaml)
 
 
-def _update_pull_request_checks_workflow(token) -> None:
+def _update_pull_request_checks_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/pr-checks.yaml"):
         with mra.EditYAML(".github/workflows/pr-checks.yaml") as yaml:
             if "attrs" not in yaml["jobs"]["build"]["steps"][0].get("run", ""):
@@ -499,44 +527,44 @@ def _update_pull_request_checks_workflow(token) -> None:
                         step.setdefault("env", {}).update(
                             {
                                 "GITHUB_EVENT": "${{ toJson(github) }}",
-                                "GITHUB_TOKEN": token,
+                                "GITHUB_TOKEN": task_env.token,
                             }
                         )
 
             _canonicalize_workflow(yaml)
 
 
-def _update_backport_workflow(token) -> None:
+def _update_backport_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/backport.yaml"):
         with mra.EditYAML(".github/workflows/backport.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
                     if step.get("uses", "") == "camptocamp/backport-action@master":
-                        step.setdefault("with", {})["token"] = token
+                        step.setdefault("with", {})["token"] = task_env.token
 
             _canonicalize_workflow(yaml)
 
 
-def _update_rebuild_workflow(gopass, token) -> None:
+def _update_rebuild_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/rebuild.yaml"):
         with mra.EditYAML(".github/workflows/rebuild.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
                     if step.get("run", "") == "c2cciutils-checks":
-                        if not gopass:
+                        if not task_env.gopass:
                             env = step.setdefault("env", {})
                             env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
                     if "c2cciutils-publish" in step.get("run", ""):
-                        if not gopass:
+                        if not task_env.gopass:
                             step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                                {"GITHUB_TOKEN": task_env.token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
                             )
 
             _canonicalize_workflow(yaml)
 
 
-def _update_pyproject_toml() -> None:
+def _update_pyproject_toml(task_env: TaskEnv) -> None:
     """
     Add or update the Poetry extensions to the pyproject.toml file.
     """
@@ -587,8 +615,8 @@ def _update_pyproject_toml() -> None:
                     poetry_plugin_tweak_dependencies_version.setdefault("default", "present")
 
 
-def _update_renovate_config(c2cciutils_version, is_docker) -> None:
-    if c2cciutils_version >= version.parse("1.6.0"):
+def _update_renovate_config(task_env: TaskEnv) -> None:
+    if task_env.c2cciutils_version >= version.parse("1.6.0"):
         if not os.path.exists(".github/renovate.json5"):
             with mra.Edit(".github/renovate.json5") as renovate_config:
                 renovate_config.data = """{
@@ -646,16 +674,19 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
                 renovate_config.data,
                 1,
             )
+            # Add missing escape
             renovate_config.data = re.sub(
                 re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
                 r"fileMatch: ['^\\\\.pre-commit-config\\\\.yaml$'],",
                 renovate_config.data,
             )
+            # Fix escapes
             renovate_config.data = re.sub(
                 re.escape(r"fileMatch: ['^ci/config\\\\.yaml$'],"),
                 r"fileMatch: ['^ci/config\\\\.yaml$'],",
                 renovate_config.data,
             )
+            # Fix escapes
             renovate_config.data = re.sub(
                 re.escape(
                     "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
@@ -664,7 +695,9 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
                 renovate_config.data,
             )
             if os.path.exists(".pre-commit-config.yaml"):
+                # Do updates on pre-commit config
                 renovate_config.add("'pre-commit': { enabled: true },", "'pre-commit'")
+                # Do updates on pre-commit additional dependencies
                 renovate_config.add_regex_manager(
                     {
                         "fileMatch": [r"^.pre-commit-config\.yaml$"],
@@ -674,7 +707,8 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
                     },
                     r"^.pre-commit-config\\.yaml$",
                 )
-            if is_docker:
+            if task_env.is_docker:
+                # Do update on packages update (trigger a rebuild)
                 renovate_config.add_regex_manager(
                     {
                         "fileMatch": [r"^ci/dpkg-versions\.yaml$"],
@@ -686,6 +720,7 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
                     },
                     r"^ci/dpkg-versions\\.yaml$",
                 )
+            # Do update on the schema present in the ci/config.yaml
             renovate_config.add_regex_manager(
                 {
                     "fileMatch": [r"^ci/config\.yaml$"],
@@ -696,6 +731,7 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
                 },
                 r"https://raw\\.githubusercontent\\.com/(?<depName>[^\\s]+)/(?<currentValue>",
             )
+            # Support the 4 parts of shellcheck-py version
             renovate_config.add_package_rule(
                 {
                     "matchPackageNames": ["shellcheck-py/shellcheck-py"],
@@ -705,13 +741,13 @@ def _update_renovate_config(c2cciutils_version, is_docker) -> None:
             )
 
 
-def _update_config(has_config, is_docker) -> None:
-    if has_config:
+def _update_config(task_env: TaskEnv) -> None:
+    if task_env.has_config:
         with mra.EditYAML("ci/config.yaml") as config:
             if "checks" in config:
                 del config["checks"]
 
-    if is_docker:
+    if task_env.is_docker:
         if not os.path.exists("ci/dpkg-versions.yaml"):
             with open("ci/dpkg-versions.yaml", "w", encoding="utf-8"):
                 pass
@@ -719,7 +755,9 @@ def _update_config(has_config, is_docker) -> None:
                 edit.data = {}
 
 
-def _update_pre_commit_config() -> None:
+def _update_pre_commit_config(task_env: TaskEnv) -> None:
+    del task_env
+
     if os.path.exists(".pre-commit-config.yaml"):
         with mra.EditPreCommitConfig() as pre_commit_config:
             pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
@@ -731,6 +769,8 @@ def _update_pre_commit_config() -> None:
                 },
                 True,
             )
+
+            # Do a spell check on the found schemas
             schemas = []
             for files_ in ("*.schema.json", "schema.json", "schema-*.json"):
                 schemas += [
@@ -738,6 +778,7 @@ def _update_pre_commit_config() -> None:
                     for f in mra.run(["git", "ls-files", files_], stdout=subprocess.PIPE).stdout.split("\n")
                     if f
                 ]
+                # Get all the schemas files
                 schemas += [
                     f
                     for f in mra.run(
@@ -761,23 +802,43 @@ def _update_pre_commit_config() -> None:
                 )
 
 
+def _get_config_force(name: str, value: bool, upgrade_config: dict[str, Any]) -> bool:
+    if name in upgrade_config.get("enabled", []):
+        return True
+    if name in upgrade_config.get("disabled", []):
+        return False
+    return value
+
+
 def _do() -> None:
     repo = mra.get_repo_config()
-    upgrade_config = {}
-    if os.path.exists(".github/upgrade-config.yaml"):
-        with open(".github/upgrade-config.yaml", encoding="utf-8") as f:
+    upgrade_config: dict[str, Any] = {}
+    if os.path.exists(".github/upgrade.yaml"):
+        with open(".github/upgrade.yaml", encoding="utf-8") as f:
             upgrade_config = py_yaml.load(f.read(), Loader=py_yaml.SafeLoader)
+    values = upgrade_config.get("values", {})
 
-    is_helm = os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml")
-    # will be: repo starts with 'camptocamp/'
-    gopass = "no-gopass" not in repo.get("types", [])
+    is_helm = _get_config_force(
+        "helm", os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml"), upgrade_config
+    )
+
+    gopass = _get_config_force(
+        "gopass",
+        "no-gopass" not in repo.get("types", []) and not repo.name.startswith("camptocamp/"),
+        upgrade_config,
+    )
+    # Get the string we used in the workflow to get the GitHub token to be used
     token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
+    if "github_token_secret" in values:
+        token = "${{ secrets." + values["github_token_secret"] + " }}"
 
+    # This is to implement a workaround of this issue: https://sourceforge.net/p/ruamel-yaml/tickets/480/
     has_config = False
     if os.path.exists("ci/config.yaml"):
         with open("ci/config.yaml", encoding="utf-8") as f:
             has_config = py_yaml.load(f.read(), Loader=py_yaml.SafeLoader)
 
+    # Get the version of c2cciutils
     c2cciutils_version = version.parse("1.6.0")
     if os.path.exists("ci/requirements.txt"):
         with mra.Edit("ci/requirements.txt") as requirements_txt:
@@ -788,37 +849,80 @@ def _do() -> None:
             ]
             if len(requirement) == 1:
                 c2cciutils_version_str = requirement[0].split("==")[1]
+                if c2cciutils_version_str.endswith(".*"):
+                    c2cciutils_version_str = c2cciutils_version_str[:-2]
                 c2cciutils_version = version.parse(c2cciutils_version_str)
+    if "c2cciutils_version" in values:
+        c2cciutils_version = version.parse(values["c2cciutils_version"])
 
     is_python = False
     for pyproject_filename in ("pyproject.toml", "app/pyproject.toml", "api/pyproject.toml"):
         if os.path.exists(pyproject_filename):
             with mra.EditTOML(pyproject_filename) as pyproject:
                 is_python = "project" in pyproject or "build-system" in pyproject
+    is_python = _get_config_force("python", is_python, upgrade_config)
 
-    is_pypi = is_python and "no-pypi" not in repo.get("type", [])
-    is_docker = (
-        os.path.exists("Dockerfile") or os.path.exists("app/Dockerfile") or os.path.exists("api/Dockerfile")
-    ) and "no-docker" not in repo.get("type", [])
-
-    _create_labels(
-        upgrade_config.get("pull-request-welcome", "pull-request-welcome" not in repo.get("types", []))
+    is_pypi = _get_config_force("pypi", is_python and "no-pypi" not in repo.get("type", []), upgrade_config)
+    is_docker = _get_config_force(
+        "docker",
+        (os.path.exists("Dockerfile") or os.path.exists("app/Dockerfile") or os.path.exists("api/Dockerfile"))
+        and "no-docker" not in repo.get("type", []),
+        upgrade_config,
     )
-    _set_schema_config(c2cciutils_version)
-    _upgrade_ubuntu()
-    _update_main_workflow(gopass, token, c2cciutils_version, is_python, is_pypi, is_docker, is_helm)
-    _update_audit_workflow(gopass, token)
-    _update_changelog_workflow(token, is_helm)
-    _update_clean_workflow(gopass)
-    _update_delete_old_workflow_run_workflow(token)
-    _update_dependency_auto_review_workflow(token)
-    _update_pull_request_checks_workflow(token)
-    _update_backport_workflow(token)
-    _update_rebuild_workflow(gopass, token)
-    _update_pyproject_toml()
-    _update_renovate_config(c2cciutils_version, is_docker)
-    _update_config(has_config, is_docker)
-    _update_pre_commit_config()
+
+    task_env = TaskEnv(
+        c2cciutils_version,
+        is_python,
+        is_pypi,
+        is_docker,
+        is_helm,
+        has_config,
+        gopass,
+        token,
+        upgrade_config.get("tags", repo.get("types", [])),
+    )
+
+    disabled = upgrade_config.get("disabled", [])
+    arguments = mra.get_arguments()
+
+    for name, task in (
+        ("create-labels", _create_labels),
+        ("set-schema-config", _set_schema_config),
+        ("upgrade-ubuntu", _upgrade_ubuntu),
+        ("update-changelog-workflow", _update_changelog_workflow),
+        ("update-clean-workflow", _update_clean_workflow),
+        ("update-dependency-auto-review-workflow", _update_dependency_auto_review_workflow),
+        ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
+        ("update-backport-workflow", _update_backport_workflow),
+    ):
+        if name not in disabled:
+            task(task_env)
+    if arguments.on_stabilization_branches:
+        for file_ in (".github/workflows/delete-old-workflow-run.yaml", ".github/renovate.json5"):
+            if os.path.exists(file_):
+                os.remove(file_)
+        for file_ in glob.glob(".github/workflows/audit*.yaml"):
+            os.remove(file_)
+        for file_ in glob.glob(".github/workflows/rebuild*.yaml"):
+            os.remove(file_)
+
+        if c2cciutils_version.major == 1 and c2cciutils_version.minor <= 3:
+            if os.path.exists("ci/config.yaml"):
+                with mra.EditYAML("ci/config.yaml") as config:
+                    config.setdefault("checks", {})["required_workflows"] = False
+    else:
+        for name, task in (
+            ("update-main-workflow", _update_main_workflow),
+            ("update-audit-workflow", _update_audit_workflow),
+            ("update-delete-old-workflow-run-workflow", _update_delete_old_workflow_run_workflow),
+            ("update-rebuild-workflow", _update_rebuild_workflow),
+            ("update-pyproject-toml", _update_pyproject_toml),
+            ("update-renovate-config", _update_renovate_config),
+            ("update-config", _update_config),
+            ("update-pre-commit-config", _update_pre_commit_config),
+        ):
+            if name not in disabled:
+                task(task_env)
 
 
 if __name__ == "__main__":
@@ -831,7 +935,8 @@ if __name__ == "__main__":
         # pull_request_branch_prefix
         config={
             "branch": "c2cciutils-upgrade",
-            "pull_request_title": "Update to c2cciutils version 1.6 (CI updates)",
+            "pull_request_branch_prefix": "c2cciutils-upgrade-",
+            "pull_request_title": "CI updates",
             "pull_request_body": "This is done by the automated script named " + os.path.basename(__file__),
         },
         description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
