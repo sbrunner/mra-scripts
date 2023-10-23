@@ -484,6 +484,7 @@ def _update_changelog_workflow(task_env: TaskEnv) -> None:
                             "--skip-from=dependabot[bot]",
                             "--skip-from=renovate[bot]",
                             "-v",
+                            *task_env.config.value("changelogAdditionalArgs", []),
                         ]
                     ),
                     "env": {
