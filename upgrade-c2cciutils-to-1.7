@@ -262,7 +262,8 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
             if os.path.exists(".github/run-changelog.mjs"):
                 os.remove(".github/run-changelog.mjs")
 
-            if task_env.use_helm:
+            create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
+            if not create_release:
                 yaml["permissions"] = {
                     "actions": "write",
                     "contents": "write",
@@ -415,12 +416,14 @@ def _update_changelog_workflow(task_env: TaskEnv) -> None:
             if "push" in yaml["on"]:
                 del yaml["on"]["push"]
 
-            if task_env.use_helm:
+            create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
+
+            if create_release:
+                yaml["on"]["push"] = {"tags": mra_yaml.commented_sec([["*.*.*", "\n\n"]])}
+            else:
                 if "workflow_dispatch" in yaml["on"]:
                     del yaml["on"]["workflow_dispatch"]
                 yaml["on"]["repository_dispatch"] = {"types": ["changelog"]}
-            else:
-                yaml["on"]["push"] = {"tags": mra_yaml.commented_sec([["*.*.*", "\n\n"]])}
 
             create_release_step = (
                 [
@@ -450,7 +453,7 @@ def _update_changelog_workflow(task_env: TaskEnv) -> None:
                         ),
                     },
                 ]
-                if not task_env.use_helm
+                if create_release
                 else []
             )
             yaml.setdefault("jobs", {}).setdefault("changelog", {})["steps"] = [
