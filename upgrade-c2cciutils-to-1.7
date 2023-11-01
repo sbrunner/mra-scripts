@@ -28,7 +28,6 @@ class Config:
     _values: dict[str, Any] = {}
     _enabled: list[str] = []
     _disabled: list[str] = []
-    _tags: list[str] = []
 
     def __init__(self) -> None:
         self.repo = mra.get_repo_config()
@@ -40,7 +39,6 @@ class Config:
                 self._values = upgrade_config.get("values", {})
                 self._enabled = upgrade_config.get("enabled", [])
                 self._disabled = upgrade_config.get("disabled", [])
-                self._tags = (upgrade_config.get("tags", self.repo.get("types", [])),)
 
     def value(self, name: str, default: Any = None) -> Any:
         return self._values.get(name, default)
@@ -52,9 +50,6 @@ class Config:
             return False
         return default
 
-    def has_tag(self, tag: str) -> bool:
-        return tag in self._tags
-
 
 class TaskEnv(NamedTuple):
     c2cciutils_version: version.Version
@@ -64,6 +59,7 @@ class TaskEnv(NamedTuple):
     use_helm: bool
     has_config: bool
     has_stabilization_branches: bool
+    on_stabilization_branches: bool
     gopass: bool
     token: str
     config: Config
@@ -98,6 +94,44 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
             None,
         ]
 
+    for name, job in workflow["jobs"].items():
+        new_data = []
+        for key in ["name", "runs-on", "timeout-minutes", "if", "needs"]:
+            if key in job:
+                new_data.append((key, job[key]))
+
+        new_data += [
+            e
+            for e in job.items()
+            if e[0] not in ("name", "runs-on", "timeout-minutes", "if", "strategy", "env", "steps")
+        ]
+
+        for key in ["strategy", "env", "steps"]:
+            if key in job:
+                new_data.append((key, job[key]))
+
+        job = ruamel.yaml.comments.CommentedMap(new_data)
+        workflow["jobs"][name] = job
+
+        for key in reversed(["name", "runs-on", "timeout-minutes", "if", "needs"]):
+            if key in job:
+                job.ca.items[key] = [
+                    None,
+                    None,
+                    ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                    None,
+                ]
+                break
+
+        for key in reversed(["strategy", "env"]):
+            if key in job:
+                job.ca.items[key] = [
+                    None,
+                    None,
+                    ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                    None,
+                ]
+
 
 def _create_labels(task_env: TaskEnv) -> None:
     mra.gh(
@@ -108,7 +142,7 @@ def _create_labels(task_env: TaskEnv) -> None:
         "--color=0075ca",
         "--description=Update the dependencies",
     )
-    if task_env.config.has_tag("pull-request-welcome"):
+    if task_env.config.enabled("pullRequestWelcome", False):
         mra.gh(
             "label",
             "create",
@@ -157,169 +191,181 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
 def _update_main_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/main.yaml"):
         with mra.EditYAML(".github/workflows/main.yaml") as yaml:
-            env = yaml.setdefault("env", {})
-            if "HAS_SECRETS" not in env:
-                env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
+            if not task_env.on_stabilization_branches:
+                env = yaml.setdefault("env", {})
+                if "HAS_SECRETS" not in env:
+                    env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
 
-                if hasattr(env, "ca"):
-                    env.ca.items.clear()
-                    env.ca.items["HAS_SECRETS"] = [
-                        None,
-                        None,
-                        ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
-                        None,
-                    ]
+                    if hasattr(env, "ca"):
+                        env.ca.items.clear()
+                        env.ca.items["HAS_SECRETS"] = [
+                            None,
+                            None,
+                            ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                            None,
+                        ]
 
-            for job in yaml["jobs"].values():
-                has_pip_login = False
-                has_docker_login = False
-                publish_index = -1
+                for job in yaml["jobs"].values():
+                    has_pip_login = False
+                    has_docker_login = False
+                    publish_index = -1
 
-                for index, step in enumerate(job["steps"]):
-                    if task_env.c2cciutils_version >= version.parse("1.6.0"):
-                        if step.get("run", "") == "c2cciutils-checks":
-                            step["name"] = "Print environment information"
-                            step["run"] = "c2cciutils-env"
-                            value = None
-                            if "env" in step:
-                                if step["env"].ca.items:
-                                    value = list(step["env"].ca.items.values())[-1][2].value
-                                del step["env"]
-                            job["steps"].ca.items[index] = [
-                                None,
-                                None,
-                                [
-                                    ruamel.yaml.CommentToken(
-                                        value or "\n\n", ruamel.yaml.error.CommentMark(0), None
-                                    )
-                                ],
-                                None,
-                            ]
-                    else:
-                        if step.get("run", "") == "c2cciutils-checks":
-                            if not task_env.gopass:
-                                env = step.setdefault("env", {})
-                                env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
-
-                    if "docker login" in step.get("run", ""):
-                        has_docker_login = True
-                    if ".pypirc" in step.get("run", ""):
-                        has_pip_login = True
-                        if step.get("name", "") == "Init pypi":
-                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                                "\n".join(
+                    for index, step in enumerate(job["steps"]):
+                        if task_env.c2cciutils_version >= version.parse("1.6.0"):
+                            if step.get("run", "") == "c2cciutils-checks":
+                                step["name"] = "Print environment information"
+                                step["run"] = "c2cciutils-env"
+                                value = None
+                                if "env" in step:
+                                    if step["env"].ca.items:
+                                        value = list(step["env"].ca.items.values())[-1][2].value
+                                    del step["env"]
+                                job["steps"].ca.items[index] = [
+                                    None,
+                                    None,
                                     [
-                                        'echo "[pypi]" > ~/.pypirc',
-                                        'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                        'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                    ]
+                                        ruamel.yaml.CommentToken(
+                                            value or "\n\n", ruamel.yaml.error.CommentMark(0), None
+                                        )
+                                    ],
+                                    None,
+                                ]
+                        else:
+                            if step.get("run", "") == "c2cciutils-checks":
+                                if not task_env.gopass:
+                                    env = step.setdefault("env", {})
+                                    env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+
+                        if "docker login" in step.get("run", ""):
+                            has_docker_login = True
+                        if ".pypirc" in step.get("run", ""):
+                            has_pip_login = True
+                            if step.get("name", "") == "Init pypi":
+                                step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                                    "\n".join(
+                                        [
+                                            'echo "[pypi]" > ~/.pypirc',
+                                            'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
+                                            'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
+                                        ]
+                                    )
                                 )
-                            )
 
-                    if "c2cciutils-publish" in step.get("run", ""):
-                        publish_index = index
-                        if not task_env.gopass:
-                            step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": task_env.token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
-                            )
+                        if "c2cciutils-publish" in step.get("run", ""):
+                            publish_index = index
+                            if not task_env.gopass:
+                                step.setdefault("env", {}).update(
+                                    {
+                                        "GITHUB_TOKEN": task_env.token,
+                                        "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                    }
+                                )
 
-                if not has_pip_login and not task_env.gopass and task_env.use_pypi and publish_index >= 0:
-                    if task_env.use_python:
+                    if not has_pip_login and not task_env.gopass and task_env.use_pypi and publish_index >= 0:
+                        if task_env.use_python:
+                            job["steps"] = (
+                                job["steps"][:publish_index]
+                                + [
+                                    {
+                                        "name": "Init pypi",
+                                        "run": ruamel.yaml.scalarstring.LiteralScalarString(
+                                            "\n".join(
+                                                [
+                                                    'echo "[pypi]" > ~/.pypirc',
+                                                    'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
+                                                    'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
+                                                ]
+                                            )
+                                        ),
+                                    }
+                                ]
+                                + job["steps"][publish_index:]
+                            )
+                    if (
+                        not has_docker_login
+                        and not task_env.gopass
+                        and task_env.use_docker
+                        and publish_index >= 0
+                    ):
                         job["steps"] = (
                             job["steps"][:publish_index]
                             + [
                                 {
-                                    "name": "Init pypi",
-                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                                        "\n".join(
-                                            [
-                                                'echo "[pypi]" > ~/.pypirc',
-                                                'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                                'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                            ]
-                                        )
-                                    ),
+                                    "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
                                 }
                             ]
                             + job["steps"][publish_index:]
                         )
-                if (
-                    not has_docker_login
-                    and not task_env.gopass
-                    and task_env.use_docker
-                    and publish_index >= 0
-                ):
-                    job["steps"] = (
-                        job["steps"][:publish_index]
-                        + [
-                            {
-                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                            }
-                        ]
-                        + job["steps"][publish_index:]
-                    )
 
-            if os.path.exists(".github/run-changelog.mjs"):
-                os.remove(".github/run-changelog.mjs")
+            publish_job = None
+            for name, job in yaml["jobs"].items():
+                for index, step in enumerate(job["steps"]):
+                    if "c2cciutils-publish" in step.get("run", ""):
+                        publish_job = name
+                        break
+                if publish_job is not None:
+                    break
 
-            create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
-            if not create_release:
-                yaml["permissions"] = {
-                    "actions": "write",
-                    "contents": "write",
-                }
+            if publish_job is not None:
+                if os.path.exists(".github/run-changelog.mjs"):
+                    os.remove(".github/run-changelog.mjs")
 
-                changelog_with = {
-                    "script": ruamel.yaml.scalarstring.LiteralScalarString(
-                        "\n".join(
-                            [
-                                "if (process.env.GITHUB_REF_TYPE == 'tag') {",
-                                "    console.log('Trigger changelog');",
-                                "    await github.rest.repos.createDispatchEvent({",
-                                "        owner: 'camptocamp',",
-                                "        repo: 'helm-mutualize',",
-                                "        event_type: 'changelog',",
-                                "    });",
-                                "}",
-                            ]
+                create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
+                if not create_release:
+                    yaml.setdefault("permissions", {})["actions"] = "write"
+                    yaml.setdefault("permissions", {})["contents"] = "write"
+
+                    changelog_with = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "\n".join(
+                                [
+                                    "if (process.env.GITHUB_REF_TYPE == 'tag') {",
+                                    "    console.log('Trigger changelog');",
+                                    "    await github.rest.repos.createDispatchEvent({",
+                                    "        owner: 'camptocamp',",
+                                    "        repo: 'helm-mutualize',",
+                                    "        event_type: 'changelog',",
+                                    "    });",
+                                    "}",
+                                ]
+                            )
                         )
-                    )
-                }
-                steps = yaml["jobs"]["main"]["steps"]
-                present = False
-                for index, step in enumerate(steps):
-                    if step.get("run") == "npm install @octokit/action":
-                        present = True
-                        del steps[index]
-                        break
+                    }
+                    steps = yaml["jobs"][publish_job]["steps"]
+                    present = False
+                    for index, step in enumerate(steps):
+                        if step.get("run") == "npm install @octokit/action":
+                            present = True
+                            del steps[index]
+                            break
 
-                for index, step in enumerate(steps):
-                    if (
-                        step.get("name") in ("Run changelog", "Trigger changelog workflow")
-                        or step.get("run") == "node .github/run-changelog.mjs"
-                    ):
-                        present = True
-                        step["name"] = "Trigger changelog workflow"
-                        step["uses"] = "actions/github-script@v6"
-                        step["with"] = changelog_with
-                        if "run" in step:
-                            del step["run"]
-                        break
+                    for index, step in enumerate(steps):
+                        if (
+                            step.get("name") in ("Run changelog", "Trigger changelog workflow")
+                            or step.get("run") == "node .github/run-changelog.mjs"
+                        ):
+                            present = True
+                            step["name"] = "Trigger changelog workflow"
+                            step["uses"] = "actions/github-script@v6"
+                            step["with"] = changelog_with
+                            if "run" in step:
+                                del step["run"]
+                            break
 
-                if not present:
-                    steps.append(
-                        {
-                            "name": "Trigger changelog workflow",
-                            "uses": "actions/github-script@v6",
-                            "with": changelog_with,
-                        }
-                    )
-                    steps.ca.items[len(steps) - 1] = [
-                        None,
-                        [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
-                        None,
-                        None,
-                    ]
+                    if not present:
+                        steps.append(
+                            {
+                                "name": "Trigger changelog workflow",
+                                "uses": "actions/github-script@v6",
+                                "with": changelog_with,
+                            }
+                        )
+                        steps.ca.items[len(steps) - 1] = [
+                            None,
+                            [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
+                            None,
+                            None,
+                        ]
 
             _canonicalize_workflow(yaml)
 
@@ -411,12 +457,15 @@ def _update_changelog_workflow(task_env: TaskEnv) -> None:
         os.remove("CHANGELOG.md")
     # TODO create if missing
     if os.path.exists(".github/workflows/changelog.yaml"):
+        create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
+        if task_env.on_stabilization_branches and not create_release:
+            os.remove(".github/workflows/changelog.yaml")
+            return
+
         with mra.EditYAML(".github/workflows/changelog.yaml") as yaml:
             yaml.setdefault("on", {})["schedule"] = [{"cron": "0 0 * * 1,4"}]
             if "push" in yaml["on"]:
                 del yaml["on"]["push"]
-
-            create_release = task_env.config.enabled("changelogCreateRelease", not task_env.use_helm)
 
             if create_release:
                 yaml["on"]["push"] = {"tags": mra_yaml.commented_sec([["*.*.*", "\n\n"]])}
@@ -539,8 +588,6 @@ def _update_delete_old_workflow_run_workflow(task_env: TaskEnv) -> None:
 
 
 def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
-    del task_env
-
     for file_ in (
         ".github/workflows/dependabot-auto-merge.yaml",
         ".github/workflows/auto-review.yaml",
@@ -1032,6 +1079,7 @@ def _get_env() -> TaskEnv:
         use_helm,
         has_config,
         config.arguments.on_stabilization_branches or len(stabilization_branches) > 0,
+        config.arguments.on_stabilization_branches and len(stabilization_branches) > 0,
         gopass,
         token,
         config,
@@ -1050,10 +1098,11 @@ def _do() -> None:
         ("update-dependency-auto-review-workflow", _update_dependency_auto_review_workflow),
         ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
         ("update-backport-workflow", _update_backport_workflow),
+        ("update-main-workflow", _update_main_workflow),
     ):
         if task_env.config.enabled(name, True):
             task(task_env)
-    if task_env.config.arguments.on_stabilization_branches:
+    if task_env.on_stabilization_branches:
         for file_ in (".github/workflows/delete-old-workflow-run.yaml", ".github/renovate.json5"):
             if os.path.exists(file_):
                 os.remove(file_)
@@ -1068,7 +1117,6 @@ def _do() -> None:
                     config.setdefault("checks", {})["required_workflows"] = False
     else:
         for name, task in (
-            ("update-main-workflow", _update_main_workflow),
             ("update-audit-workflow", _update_audit_workflow),
             ("update-delete-old-workflow-run-workflow", _update_delete_old_workflow_run_workflow),
             ("update-rebuild-workflow", _update_rebuild_workflow),
