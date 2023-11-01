@@ -559,9 +559,12 @@ def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
     # TODO create if missing
     if os.path.exists(".github/workflows/dependency-auto-review.yaml"):
         with mra.EditYAML(".github/workflows/dependency-auto-review.yaml") as yaml:
+            users = task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
             yaml["on"] = {"pull_request": {"types": ["opened", "reopened"]}}
             for job in yaml["jobs"].values():
-                job["if"] = "github.event.pull_request.user.login == 'renovate[bot]'"
+                job["if"] = " or ".join(
+                    [f"github.event.pull_request.user.login == '{user}'" for user in users]
+                )
                 job["steps"] = [
                     {
                         "uses": "actions/github-script@v6",
@@ -950,6 +953,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "args": [
                             "--fields=description,title",
                             "--spelling=.github/spell-ignore-words.txt",
+                            "--ignore-numbers",
+                            "--ignore-acronyms",
+                            "--en-us",
                         ],
                     },
                 )
