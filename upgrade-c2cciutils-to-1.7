@@ -200,6 +200,8 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
 
 
 def _update_main_workflow(task_env: TaskEnv) -> None:
+    if not os.path.exists(".github/workflows/main.yaml") and os.path.exists(".github/workflows/ci.yaml"):
+        os.rename(".github/workflows/ci.yaml", ".github/workflows/main.yaml")
     if os.path.exists(".github/workflows/main.yaml"):
         with mra.EditYAML(".github/workflows/main.yaml") as yaml:
             if not task_env.on_stabilization_branches:
