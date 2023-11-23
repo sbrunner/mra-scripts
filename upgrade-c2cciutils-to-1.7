@@ -507,6 +507,8 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                 if "c2cciutils-docker-versions-update" in step.get("run", ""):
                     step["name"] = "Update dpkg packages versions"
                     dpkg_found = True
+
+                    step["if"] = "steps.dpkg-versions.outputs.files_exists == 'true'"
                     if not task_env.gopass:
                         step.setdefault("env").update(
                             {
@@ -550,13 +552,23 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
             if not dpkg_found:
                 job["steps"].append(
                     {
+                        "name": "Check ci/dpkg-versions.yaml file existence",
+                        "id": "dpkg-versions",
+                        "uses": "andstor/file-existence-action@v2",
+                        "with": {"files": "ci/dpkg-versions.yaml"},
+                    }
+                )
+                job["steps"].append(
+                    {
                         "name": "Update dpkg packages versions",
                         "run": "c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
+                        "if": "steps.dpkg-versions.outputs.files_exists == 'true'",
                     }
                     if task_env.gopass
                     else {
                         "name": "Update dpkg packages versions",
                         "run": "c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
+                        "if": "steps.dpkg-versions.outputs.files_exists == 'true'",
                         "env": {  # type: ignore[dict-item]
                             "GITHUB_TOKEN": task_env.token,
                             "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
@@ -1015,6 +1027,9 @@ def _update_rebuild_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/rebuild.yaml"):
         with mra.EditYAML(".github/workflows/rebuild.yaml") as yaml:
             for job in yaml["jobs"].values():
+                if "master" in job.get("strategy", {}).get("matrix", {}).get("branch", []):
+                    job["strategy"]["matrix"]["branch"].remove("master")
+
                 for step in job["steps"]:
                     if step.get("run", "") == "c2cciutils-checks":
                         if not task_env.gopass:
@@ -1155,7 +1170,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
         renovate_config["schedule"] = "after 5pm on the first day of the month"
         if os.path.exists(".pre-commit-config.yaml"):
-            preCommit = mra.JSON5RowAttribute()
+            preCommit = mra.JSON5RowDict()
             preCommit.comment = ["Do updates on pre-commit config"]
             preCommit.value = {"enabled": True}
 
@@ -1168,17 +1183,16 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 },
                 ["Do updates on pre-commit additional dependencies"],
             )
-        if task_env.use_docker:
-            # Do update on packages update (trigger a rebuild)
-            renovate_config.add_regex_manager(
-                {
-                    "fileMatch": [f'^{re.escape("ci/dpkg-versions.yaml")}$'],
-                    "matchStrings": [r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"],
-                    "datasourceTemplate": "repology",
-                    "versioningTemplate": "loose",
-                },
-                ["Do update on packages update (trigger a rebuild)"],
-            )
+        # No more do update on packages update (trigger a rebuild)
+        renovate_config.remove_regex_manager(
+            {
+                "fileMatch": [f'^{re.escape("ci/dpkg-versions.yaml")}$'],
+                "matchStrings": [r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"],
+                "datasourceTemplate": "repology",
+                "versioningTemplate": "loose",
+            },
+            ["Do update on packages update (trigger a rebuild)"],
+        )
         # Do update on the schema present in the ci/config.yaml
         renovate_config.add_regex_manager(
             {
@@ -1257,19 +1271,12 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ["Group Poetry packages"],
             )
         if task_env.use_docker and task_env.has_stabilization_branches:
-            # Update dpkg versions every day
-            renovate_config.add_package_rule(
+            # No more update dpkg versions every day
+            renovate_config.remove_package_rule(
                 {
-                    "matchBaseBranches": task_env.config.value(
-                        "matchStabilizationBranches", [r"/^[0-9]+\.[0-9]+$/"]
-                    ),
-                    "matchFileNames": ["ci/dpkg-versions.yaml"],
-                    "schedule": ["at any time"],
                     "groupName": "dpkg",
-                    "automerge": True,
                 },
                 ["Update dpkg versions at any time"],
-                checks_keys=["groupName"],
             )
 
         renovate_config.add_package_rule(
