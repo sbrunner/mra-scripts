@@ -19,9 +19,7 @@ from ruamel.yaml import YAML
 
 
 def _do() -> None:
-    mra.run(
-        [mra.get_browser(), f"https://github.com/{mra.get_repo_config()['name']}/settings/security_analysis"]
-    )
+    mra.run([mra.get_browser(), f"https://github.com/{mra.get_repo_config()['name']}/settings/branches"])
 
 
 if __name__ == "__main__":
