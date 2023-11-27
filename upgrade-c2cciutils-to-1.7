@@ -442,6 +442,7 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                         "          DEBUG: '*snyk*'",
                     ]
                 )
+    if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
             if task_env.gopass:
                 gopass_init = False
@@ -507,25 +508,21 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                         else:
                             step["name"] = "Snyk audit"
                             audit_found = True
+                        step.setdefault("env", {})["GITHUB_TOKEN"] = task_env.token
                         if not task_env.gopass:
-                            step.setdefault("env", {}).update(
-                                {
-                                    "GITHUB_TOKEN": task_env.token,
-                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
-                            )
+                            step.setdefault("env", {})["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"
                     if "c2cciutils-docker-versions-update" in step.get("run", ""):
                         step["name"] = "Update dpkg packages versions"
+                        step[
+                            "run"
+                        ] = "~/.venv/bin/c2cciutils-docker-versions-update --branch=${{ matrix.branch }}"
                         dpkg_found = True
 
                         step["if"] = "steps.dpkg-versions.outputs.files_exists == 'true'"
-                        if not task_env.gopass:
-                            step.setdefault("env").update(
-                                {
-                                    "GITHUB_TOKEN": task_env.token,
-                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
-                            )
+                        step.setdefault("env", {})["GITHUB_TOKEN"] = task_env.token
+                        if "SNYK_TOKEN" in step["env"]:
+                            del step["env"]["SNYK_TOKEN"]
+
                 if missing_git_config:
                     job["steps"].insert(
                         checkout_step + 1,
@@ -547,6 +544,9 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                         {
                             "name": "Snyk audit",
                             "run": "c2cciutils-audit --branch=${{ matrix.branch }}",
+                            "env": {  # type: ignore[dict-item]
+                                "GITHUB_TOKEN": task_env.token,
+                            },
                         }
                         if task_env.gopass
                         else {
@@ -571,13 +571,16 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                     job["steps"].append(
                         {
                             "name": "Update dpkg packages versions",
-                            "run": "c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
+                            "run": "~/.venv/bin/c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
                             "if": "steps.dpkg-versions.outputs.files_exists == 'true'",
+                            "env": {  # type: ignore[dict-item]
+                                "GITHUB_TOKEN": task_env.token,
+                            },
                         }
                         if task_env.gopass
                         else {
                             "name": "Update dpkg packages versions",
-                            "run": "c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
+                            "run": "~/.venv/bin/c2cciutils-docker-versions-update --branch=${{ matrix.branch }}",
                             "if": "steps.dpkg-versions.outputs.files_exists == 'true'",
                             "env": {  # type: ignore[dict-item]
                                 "GITHUB_TOKEN": task_env.token,
