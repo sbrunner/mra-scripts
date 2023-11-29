@@ -360,7 +360,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         ):
                             present = True
                             step["name"] = "Trigger changelog workflow"
-                            step["uses"] = "actions/github-script@v6"
+                            step["uses"] = "actions/github-script@v7"
                             step["with"] = changelog_with
                             if "run" in step:
                                 del step["run"]
@@ -370,7 +370,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         steps.append(
                             {
                                 "name": "Trigger changelog workflow",
-                                "uses": "actions/github-script@v6",
+                                "uses": "actions/github-script@v7",
                                 "with": changelog_with,
                             }
                         )
@@ -420,7 +420,8 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                         "          ci-gpg-private-key: ${{secrets.CI_GPG_PRIVATE_KEY}}",
                         "          github-gopass-ci-token: ${{secrets.GOPASS_CI_GITHUB_TOKEN}}",
                         "",
-                        "      - run: python3 -m pip install --pre c2cciutils[audit]",
+                        "      - run: python3 -m venv ~/.venv",
+                        "      - run: ~/.venv/bin/pip install --pre c2cciutils[audit]",
                         "",
                         "      - name: Check .tool-versions file existence",
                         "        id: tool-versions",
@@ -503,7 +504,7 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
                         if not step.get("run", "").startswith("git config ") and not task_env.gopass:
                             missing_git_config = True
                     if "c2cciutils-audit" in step.get("run", ""):
-                        if "debug" in step["name"]:
+                        if "DEBUG" in step.get("env", {}):
                             step["name"] = "Debug Snyk audit"
                         else:
                             step["name"] = "Snyk audit"
@@ -935,7 +936,7 @@ def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
                     "    timeout-minutes: 5",
                     "",
                     "    steps:",
-                    "      - uses: actions/github-script@v6",
+                    "      - uses: actions/github-script@v7",
                     "        with:",
                     "          script: |-",
                     "            github.rest.pulls.createReview({",
@@ -952,25 +953,20 @@ def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
         yaml["on"] = {"pull_request": {"types": ["opened", "reopened"]}}
         for job in yaml["jobs"].values():
             job["if"] = " or ".join([f"github.event.pull_request.user.login == '{user}'" for user in users])
-            job["steps"] = [
-                {
-                    "uses": "actions/github-script@v6",
-                    "with": {
-                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
-                            "\n".join(
-                                [
-                                    "github.rest.pulls.createReview({",
-                                    "  owner: context.repo.owner,",
-                                    "  repo: context.repo.repo,",
-                                    "  pull_number: context.payload.pull_request.number,",
-                                    "  event: 'APPROVE',",
-                                    "})",
-                                ]
-                            )
-                        )
-                    },
-                }
-            ]
+            job["steps"][0]["with"] = {
+                "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                    "\n".join(
+                        [
+                            "github.rest.pulls.createReview({",
+                            "  owner: context.repo.owner,",
+                            "  repo: context.repo.repo,",
+                            "  pull_number: context.payload.pull_request.number,",
+                            "  event: 'APPROVE',",
+                            "})",
+                        ]
+                    )
+                )
+            }
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
@@ -1190,6 +1186,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
         if renovate_config.get("extends", []) == ["config:base"]:
             renovate_config["extends"] = [
+                ":dependencyDashboard",
                 "group:monorepos",
                 "group:recommended",
                 "replacements:all",
