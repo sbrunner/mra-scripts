@@ -4,7 +4,7 @@ import glob
 import os
 import re
 import subprocess
-from typing import Any, NamedTuple
+from typing import Any, AnyStr, NamedTuple, Optional, Union
 
 import c2cciutils.lib.docker
 import json5
@@ -65,19 +65,59 @@ class TaskEnv(NamedTuple):
     config: Config
 
 
-def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
+def _order_keys(
+    data: dict[str, Any], first_keys: list[str], last_keys: Optional[list[str]] = None
+) -> ruamel.yaml.comments.CommentedMap:
+    if last_keys is None:
+        last_keys = []
+
+    # use order: <first_keys>, <other>, <last_keys>
     new_data = []
-    for key in ["name", "on", "permissions", "env"]:
-        if key in workflow:
-            new_data.append((key, workflow[key]))
+    for key in first_keys:
+        if key in data:
+            new_data.append((key, data[key]))
 
-    new_data += [e for e in workflow.items() if e[0] not in ("name", "on", "permissions", "env", "jobs")]
+    new_data += [e for e in data.items() if e[0] not in [*first_keys, *last_keys]]
 
-    if "jobs" in workflow:
-        new_data.append(("jobs", workflow["jobs"]))
+    for key in last_keys:
+        if key in data:
+            new_data.append((key, data[key]))
 
-    workflow.data = ruamel.yaml.comments.CommentedMap(new_data)
+    return ruamel.yaml.comments.CommentedMap(new_data)
 
+
+def _order_sub_keys(
+    data: Union[dict[str, dict[str, Any]], list[dict[str, AnyStr]]],
+    first_keys: list[str],
+    last_keys: Optional[list[str]] = None,
+) -> None:
+    items = data.items() if isinstance(data, dict) else enumerate(data)
+    for key, value in items:
+        # copy the last comment
+        comment = None
+        if hasattr(value, "ca"):
+            last_value = list(value.values())[-1]
+            if isinstance(last_value, dict) and hasattr(last_value, "ca"):
+                last_last_key = list(last_value.keys())[-1]
+                comment = last_value.ca.items.get(last_last_key)
+                if comment is not None:
+                    del last_value.ca.items[last_last_key]
+            else:
+                comment = value.ca.items.get(list(value.keys())[-1])
+        data[key] = _order_keys(value, first_keys, last_keys)
+        if comment is not None:
+            last_key = list(data[key].keys())[-1]
+            if isinstance(data[key][last_key], ruamel.yaml.comments.CommentedMap):
+                last_last_key = list(data[key][last_key].keys())[-1]
+                data[key][last_key].ca.items[last_last_key] = comment
+            else:
+                data[key].ca.items[last_key] = comment
+
+
+def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
+    workflow.data = _order_keys(workflow.data, ["name", "on", "permissions", "env"], ["jobs"])
+
+    # Add space after simple key
     for key in ["name"]:
         workflow.data.ca.items[key] = [
             None,
@@ -86,6 +126,7 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
             None,
         ]
 
+    # add space after complex keys
     for key in ["on", "permissions", "env", "jobs"]:
         workflow.data.ca.items[key] = [
             None,
@@ -95,33 +136,11 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
         ]
 
     for name, job in workflow["jobs"].items():
-        new_data = []
-        for key in ["name", "runs-on", "timeout-minutes", "if", "concurrency", "needs"]:
-            if key in job:
-                new_data.append((key, job[key]))
-
-        new_data += [
-            e
-            for e in job.items()
-            if e[0]
-            not in (
-                "name",
-                "runs-on",
-                "timeout-minutes",
-                "if",
-                "concurrency",
-                "needs",
-                "strategy",
-                "env",
-                "steps",
-            )
-        ]
-
-        for key in ["strategy", "env", "steps"]:
-            if key in job:
-                new_data.append((key, job[key]))
-
-        job = ruamel.yaml.comments.CommentedMap(new_data)
+        job = _order_keys(
+            job,
+            ["name", "runs-on", "timeout-minutes", "if", "concurrency", "needs"],
+            ["strategy", "env", "steps"],
+        )
         workflow["jobs"][name] = job
 
         for key in reversed(["name", "runs-on", "timeout-minutes", "if", "concurrency", "needs"]):
@@ -142,6 +161,10 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
                     ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
                     None,
                 ]
+
+        for job in workflow["jobs"].values():
+            if "steps" in job:
+                _order_sub_keys(job["steps"], ["name"], ["uses", "with", "run", "env", "if"])
 
 
 def _create_labels(task_env: TaskEnv) -> None:
@@ -193,10 +216,13 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
         ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
     ).stdout.split("\n"):
         if workflow_file:
-            with mra.EditYAML(workflow_file) as yaml:
-                for job in yaml["jobs"].values():
-                    if job.get("runs-on", "").startswith("ubuntu-"):
-                        job["runs-on"] = "ubuntu-22.04"
+            try:
+                with mra.EditYAML(workflow_file) as yaml:
+                    for job in yaml["jobs"].values():
+                        if job.get("runs-on", "").startswith("ubuntu-"):
+                            job["runs-on"] = "ubuntu-22.04"
+            except Exception as e:
+                print(f"Error in {workflow_file}: {e}")
 
 
 def _update_main_workflow(task_env: TaskEnv) -> None:
@@ -218,12 +244,20 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             None,
                         ]
 
-                for job in yaml["jobs"].values():
-                    has_pip_login = False
-                    has_docker_login = False
-                    publish_index = -1
+            has_pre_commit_copyright = (
+                mra.run(["grep", "sbrunner/hooks", ".pre-commit-config.yaml"], exit_on_error=False).returncode
+                == 0
+            )
+            for job in yaml["jobs"].values():
+                has_pip_login = False
+                has_docker_login = False
+                publish_index = -1
 
-                    for index, step in enumerate(job["steps"]):
+                for index, step in enumerate(job["steps"]):
+                    # if has_pre_commit_copyright and step.get("uses", "").startswith("actions/checkout"):
+                    #    step.setdefault("with", {})["fetch-depth"] = 0
+
+                    if not task_env.on_stabilization_branches:
                         if task_env.c2cciutils_version >= version.parse("1.6.0"):
                             if step.get("run", "") == "c2cciutils-checks":
                                 step["name"] = "Print environment information"
@@ -265,51 +299,57 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     )
                                 )
 
-                        if "c2cciutils-publish" in step.get("run", ""):
-                            publish_index = index
-                            if not task_env.gopass:
-                                step.setdefault("env", {}).update(
-                                    {
-                                        "GITHUB_TOKEN": task_env.token,
-                                        "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                    }
-                                )
+                    if "c2cciutils-publish" in step.get("run", ""):
+                        publish_index = index
+                        if not task_env.gopass:
+                            step.setdefault("env", {}).update(
+                                {
+                                    "GITHUB_TOKEN": task_env.token,
+                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                }
+                            )
 
-                    if not has_pip_login and not task_env.gopass and task_env.use_pypi and publish_index >= 0:
-                        if task_env.use_python:
+                    if not task_env.on_stabilization_branches:
+                        if (
+                            not has_pip_login
+                            and not task_env.gopass
+                            and task_env.use_pypi
+                            and publish_index >= 0
+                        ):
+                            if task_env.use_python:
+                                job["steps"] = (
+                                    job["steps"][:publish_index]
+                                    + [
+                                        {
+                                            "name": "Init pypi",
+                                            "run": ruamel.yaml.scalarstring.LiteralScalarString(
+                                                "\n".join(
+                                                    [
+                                                        'echo "[pypi]" > ~/.pypirc',
+                                                        'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
+                                                        'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
+                                                    ]
+                                                )
+                                            ),
+                                        }
+                                    ]
+                                    + job["steps"][publish_index:]
+                                )
+                        if (
+                            not has_docker_login
+                            and not task_env.gopass
+                            and task_env.use_docker
+                            and publish_index >= 0
+                        ):
                             job["steps"] = (
                                 job["steps"][:publish_index]
                                 + [
                                     {
-                                        "name": "Init pypi",
-                                        "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                                            "\n".join(
-                                                [
-                                                    'echo "[pypi]" > ~/.pypirc',
-                                                    'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                                    'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                                ]
-                                            )
-                                        ),
+                                        "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
                                     }
                                 ]
                                 + job["steps"][publish_index:]
                             )
-                    if (
-                        not has_docker_login
-                        and not task_env.gopass
-                        and task_env.use_docker
-                        and publish_index >= 0
-                    ):
-                        job["steps"] = (
-                            job["steps"][:publish_index]
-                            + [
-                                {
-                                    "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                                }
-                            ]
-                            + job["steps"][publish_index:]
-                        )
 
             publish_job = None
             for name, job in yaml["jobs"].items():
@@ -329,6 +369,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                     yaml.setdefault("permissions", {})["actions"] = "write"
                     yaml.setdefault("permissions", {})["contents"] = "write"
 
+                    org, repo = task_env.config.repo["name"].split("/")
                     changelog_with = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
                             "\n".join(
@@ -336,8 +377,8 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     "if (process.env.GITHUB_REF_TYPE == 'tag') {",
                                     "    console.log('Trigger changelog');",
                                     "    await github.rest.repos.createDispatchEvent({",
-                                    "        owner: 'camptocamp',",
-                                    "        repo: 'helm-mutualize',",
+                                    f"        owner: '{org}',",
+                                    f"        repo: '{repo}',",
                                     "        event_type: 'changelog',",
                                     "    });",
                                     "}",
@@ -360,7 +401,6 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         ):
                             present = True
                             step["name"] = "Trigger changelog workflow"
-                            step["uses"] = "actions/github-script@v7"
                             step["with"] = changelog_with
                             if "run" in step:
                                 del step["run"]
@@ -857,9 +897,21 @@ def _update_clean_workflow(task_env: TaskEnv) -> None:
             _canonicalize_workflow(yaml)
 
 
-def _update_delete_old_workflow_run_workflow(task_env: TaskEnv) -> None:
-    if not os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
-        with mra.Edit(".github/workflows/delete-old-workflow-run.yaml") as text:
+def _update_delete_old_workflows_run_workflow(task_env: TaskEnv) -> None:
+    if os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
+        if not os.path.exists(".github/workflows/delete-old-workflows-run.yaml"):
+            mra.run(
+                [
+                    "git",
+                    "mv",
+                    ".github/workflows/delete-old-workflow-run.yaml",
+                    ".github/workflows/delete-old-workflows-run.yaml",
+                ]
+            )
+        else:
+            os.remove(".github/workflows/delete-old-workflow-run.yaml")
+    if not os.path.exists(".github/workflows/delete-old-workflows-run.yaml"):
+        with mra.Edit(".github/workflows/delete-old-workflows-run.yaml") as text:
             text.data = "\n".join(
                 [
                     "name: Delete old workflow runs",
@@ -887,7 +939,7 @@ def _update_delete_old_workflow_run_workflow(task_env: TaskEnv) -> None:
                     "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
                 ]
             )
-    with mra.EditYAML(".github/workflows/delete-old-workflow-run.yaml") as yaml:
+    with mra.EditYAML(".github/workflows/delete-old-workflows-run.yaml") as yaml:
         for job in yaml["jobs"].values():
             for step in job["steps"]:
                 if step.get("uses", "").startswith("MajorScruffy/delete-old-workflow-runs"):
@@ -898,15 +950,31 @@ def _update_delete_old_workflow_run_workflow(task_env: TaskEnv) -> None:
             _canonicalize_workflow(yaml)
 
 
-def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
+def safe_or(elements: list[str], prefix: str = "") -> str:
+    if len(elements) == 0:
+        return ""
+    if len(elements) == 1:
+        return elements[0]
+    return "(" + f"\n{prefix}|| ".join(elements) + ")"
+
+
+def _and(elements: list[str], prefix: str = "") -> str:
+    elements = [e for e in elements if e]
+    if len(elements) == 0:
+        return ""
+    return f"\n{prefix}&& ".join(elements)
+
+
+def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
     for file_ in (
         ".github/workflows/dependabot-auto-merge.yaml",
         ".github/workflows/auto-review.yaml",
         ".github/workflows/auto-merge.yaml",
         ".github/workflows/dependency-update-review.yaml",
+        ".github/workflows/dependency-auto-review.yaml",
     ):
         if os.path.exists(file_):
-            if os.path.exists(".github/workflows/dependency-auto-review.yaml"):
+            if os.path.exists(".github/workflows/pull-request-automation.yaml"):
                 os.remove(file_)
             else:
                 mra.run(
@@ -914,11 +982,11 @@ def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
                         "git",
                         "mv",
                         file_,
-                        ".github/workflows/dependency-auto-review.yaml",
+                        ".github/workflows/pull-request-automation.yaml",
                     ]
                 )
-    if not os.path.exists(".github/workflows/dependency-auto-review.yaml"):
-        with mra.Edit(".github/workflows/dependency-auto-review.yaml") as text:
+    if not os.path.exists(".github/workflows/pull-request-automation.yaml"):
+        with mra.Edit(".github/workflows/pull-request-automation.yaml") as text:
             text.data = "\n".join(
                 [
                     "name: Auto reviews updates",
@@ -948,25 +1016,229 @@ def _update_dependency_auto_review_workflow(task_env: TaskEnv) -> None:
                     "    if: github.event.pull_request.user.login == 'renovate[bot]'",
                 ]
             )
-    with mra.EditYAML(".github/workflows/dependency-auto-review.yaml") as yaml:
+    with mra.EditYAML(".github/workflows/pull-request-automation.yaml") as yaml:
         users = task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
+        ci_user = task_env.config.value("CIUser", "c2c-bot-gis-ci" if task_env.gopass else "sbrunner")
         yaml["on"] = {"pull_request": {"types": ["opened", "reopened"]}}
+        yaml["name"] = "Auto reviews, merge and close pull requests"
         for job in yaml["jobs"].values():
-            job["if"] = " or ".join([f"github.event.pull_request.user.login == '{user}'" for user in users])
-            job["steps"][0]["with"] = {
-                "script": ruamel.yaml.scalarstring.LiteralScalarString(
-                    "\n".join(
-                        [
-                            "github.rest.pulls.createReview({",
-                            "  owner: context.repo.owner,",
-                            "  repo: context.repo.repo,",
-                            "  pull_number: context.payload.pull_request.number,",
-                            "  event: 'APPROVE',",
-                            "})",
-                        ]
+            job["name"] = "Auto reviews, merge and close pull requests"
+            if "if" in job:
+                del job["if"]
+
+            PRINT_EVENT = "Print event"
+            PRINT_CONTEXT = "Print context"
+            AUTO_REVIEW_RENOVATE_UPDATES = "Auto reviews Renovate updates"
+            AUTO_REVIEW_AND_MERGE_DPKG_UPDATES = "Auto review and merge dpkg updates"
+            AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX = "Auto review and merge snyk auto fix"
+            RESTART_AUDIT = "Restart audit"
+            AUTO_CLOSE_PRE_COMMIT_CI_AUTOUPDATE = "Auto close pre-commit.ci autoupdate"
+            step_names = [
+                PRINT_EVENT,
+                PRINT_CONTEXT,
+                AUTO_REVIEW_RENOVATE_UPDATES,
+                *([AUTO_REVIEW_AND_MERGE_DPKG_UPDATES] if os.path.exists("ci/dpkg-versions.yaml") else []),
+                AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX,
+                RESTART_AUDIT,
+                AUTO_CLOSE_PRE_COMMIT_CI_AUTOUPDATE,
+            ]
+
+            old_step = {}
+            for new_step_name in step_names:
+                for step in job["steps"]:
+                    if step["name"] == new_step_name:
+                        old_step[new_step_name] = step
+                        break
+
+            job["steps"] = [old_step.get(step, {"name": step}) for step in step_names]
+
+            for step in job["steps"]:
+                if step["name"] == PRINT_EVENT:
+                    step["run"] = 'echo "${GITHUB}" | jq'
+                    step["env"] = {
+                        "GITHUB": "${{ github }}",
+                    }
+                if step["name"] == PRINT_CONTEXT:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "\n".join(["console.log(context);"])
+                        )
+                    }
+                    if "if" in step:
+                        del step["if"]
+                    if "env" in step:
+                        del step["env"]
+                if step["name"] == AUTO_REVIEW_RENOVATE_UPDATES:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                        _and(
+                            [
+                                safe_or(
+                                    [f"github.event.pull_request.user.login == '{user}'" for user in users],
+                                    "  ",
+                                ),
+                                safe_or(
+                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
+                                    "  ",
+                                ),
+                            ]
+                        )
                     )
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "\n".join(
+                                [
+                                    "github.rest.pulls.createReview({",
+                                    "  owner: context.repo.owner,",
+                                    "  repo: context.repo.repo,",
+                                    "  pull_number: context.payload.pull_request.number,",
+                                    "  event: 'APPROVE',",
+                                    "})",
+                                ]
+                            )
+                        )
+                    }
+                auto_review_merge_script = "\n".join(
+                    [
+                        "github.rest.pulls.createReview({",
+                        "  owner: context.repo.owner,",
+                        "  repo: context.repo.repo,",
+                        "  pull_number: context.payload.pull_request.number,",
+                        "  event: 'APPROVE',",
+                        "});",
+                        "github.graphql(`",
+                        "  mutation {",
+                        "    enablePullRequestAutoMerge(input: {",
+                        '      pullRequestId: "${context.payload.pull_request.node_id}",',
+                        "      mergeMethod: SQUASH,",
+                        "    }) {",
+                        "      pullRequest {",
+                        "        autoMergeRequest {",
+                        "          enabledAt",
+                        "        }",
+                        "      }",
+                        "    }",
+                        "  }",
+                        "`)",
+                    ]
                 )
-            }
+
+                if step["name"] == AUTO_REVIEW_AND_MERGE_DPKG_UPDATES:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                        _and(
+                            [
+                                f"github.event.pull_request.user.login == '{ci_user}'",
+                                "startsWith(github.head_ref, 'dpkg-update/')",
+                                safe_or(
+                                    [
+                                        "github.event.action == 'opened'",
+                                        "github.event.action == 'reopened'",
+                                    ],
+                                    "  ",
+                                ),
+                            ]
+                        )
+                    )
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(auto_review_merge_script)
+                    }
+                if step["name"] == AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                        _and(
+                            [
+                                f"github.event.pull_request.user.login == '{ci_user}'",
+                                "startsWith(github.head_ref, 'snyk-fix/')",
+                                safe_or(
+                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
+                                    "  ",
+                                ),
+                            ]
+                        )
+                    )
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(auto_review_merge_script)
+                    }
+                if step["name"] == RESTART_AUDIT:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                        _and(
+                            [
+                                f"github.event.pull_request.user.login == '{ci_user}'",
+                                safe_or(
+                                    [
+                                        "startsWith(github.head_ref, 'snyk-fix/')",
+                                        "startsWith(github.head_ref, 'dpkg-update/')",
+                                    ],
+                                    "  ",
+                                ),
+                                "github.event.action == 'closed'",
+                            ]
+                        )
+                    )
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "\n".join(
+                                [
+                                    "let runs = await github.rest.actions.listWorkflowRuns({",
+                                    "  owner: context.repo.owner,",
+                                    "  repo: context.repo.repo,",
+                                    "  workflow_id: 'audit.yaml',",
+                                    "  per_page: 1,",
+                                    "});",
+                                    "runs = runs.data.workflow_runs;",
+                                    "if (runs.length == 1 && runs[0].status != 'success') {",
+                                    "  console.log(`Rerun workflow ${runs[0].id} ${runs[0].status}`);",
+                                    "  github.rest.actions.reRunWorkflowFailedJobs({",
+                                    "    owner: context.repo.owner,",
+                                    "    repo: context.repo.repo,",
+                                    "    run_id: runs[0].id,",
+                                    "  });",
+                                    "}",
+                                ]
+                            )
+                        )
+                    }
+                if step["name"] == AUTO_CLOSE_PRE_COMMIT_CI_AUTOUPDATE:
+                    if not step.get("uses", "").startswith("actions/github-script@"):
+                        step["uses"] = "actions/github-script@v7"
+                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                        _and(
+                            [
+                                "github.event.pull_request.user.login == 'pre-commit-ci'",
+                                safe_or(
+                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
+                                    "  ",
+                                ),
+                            ]
+                        )
+                    )
+                    step["with"] = {
+                        "script": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "\n".join(
+                                [
+                                    "github.rest.pulls.update({",
+                                    "  owner: context.repo.owner,",
+                                    "  repo: context.repo.repo,",
+                                    "  pull_number: context.payload.pull_request.number,",
+                                    "  state: 'closed',",
+                                    "});",
+                                ]
+                            )
+                        )
+                    }
+
+            if not task_env.gopass:
+                job["steps"][0]["env"] = {
+                    "GITHUB_TOKEN": task_env.token,
+                }
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
@@ -1094,7 +1366,10 @@ def _update_rebuild_workflow(task_env: TaskEnv) -> None:
                     if "c2cciutils-publish" in step.get("run", ""):
                         if not task_env.gopass:
                             step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": task_env.token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                                {
+                                    "GITHUB_TOKEN": task_env.token,
+                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                }
                             )
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
@@ -1122,6 +1397,16 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                     if "requires" in pyproject.get("build-system", {}) and "python" in pyproject.get(
                         "tool", {}
                     ).get("poetry", {}).get("dependencies", {}):
+                        # tool.mypy.python_version as string
+                        if (
+                            "tool" in pyproject
+                            and "mypy" in pyproject["tool"]
+                            and "python_version" in pyproject["tool"]["mypy"]
+                        ):
+                            pyproject["tool"]["mypy"]["python_version"] = str(
+                                pyproject["tool"]["mypy"]["python_version"]
+                            )
+
                         for plugin in (
                             "poetry-dynamic-versioning",
                             "poetry-plugin-tweak-dependencies-version",
@@ -1350,9 +1635,19 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ["Update dpkg versions at any time"],
             )
 
-        renovate_config.add_package_rule(
+        renovate_config.remove_package_rule(
             {"matchDatasources": ["github-actions", "pre-commit"], "automerge": True},
             ["Auto merge the GitHub action and pre-commit updates"],
+        )
+        renovate_config.add_package_rule(
+            {
+                "matchFileNames": [".github/**", ".pre-commit-config.yaml", "ci/**"],
+                "groupName": "CI dependencies",
+                "automerge": True,
+                "separateMajorMinor": False,
+                "separateMinorPatch": False,
+            },
+            ["Group and auto merge the CI dependencies"],
         )
 
 
@@ -1388,8 +1683,6 @@ def _update_config(task_env: TaskEnv) -> None:
 
 
 def _update_pre_commit_config(task_env: TaskEnv) -> None:
-    del task_env
-
     if os.path.exists(".pre-commit-config.yaml"):
         with mra.EditPreCommitConfig() as pre_commit_config:
             pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
@@ -1435,7 +1728,14 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         ],
                     },
                 )
+    _update_pre_commit_config_stabilization_branches(task_env)
 
+
+def _update_pre_commit_config_stabilization_branches(task_env: TaskEnv) -> None:
+    del task_env
+
+    if os.path.exists(".pre-commit-config.yaml"):
+        with mra.EditPreCommitConfig() as pre_commit_config:
             for repo in pre_commit_config.data["repos"]:
                 # Fucking branch renaming
                 if (
@@ -1501,9 +1801,6 @@ def _get_env() -> TaskEnv:
     )
 
     stabilization_branches = mra.get_stabilization_branches(config.repo)
-    master_branch = mra.get_default_branch()
-    if master_branch in stabilization_branches:
-        stabilization_branches.remove(master_branch)
 
     return TaskEnv(
         c2cciutils_version,
@@ -1527,10 +1824,9 @@ def _do() -> None:
     for name, task in (
         ("create-labels", _create_labels),
         ("set-schema-config", _set_schema_config),
-        ("upgrade-ubuntu", _upgrade_ubuntu),
         ("update-changelog-workflow", _update_changelog_workflow),
         ("update-clean-workflow", _update_clean_workflow),
-        ("update-dependency-auto-review-workflow", _update_dependency_auto_review_workflow),
+        ("update-dependency-auto-review-workflow", _update_pull_request_automation_workflow),
         ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
         ("update-backport-workflow", _update_backport_workflow),
         ("update-main-workflow", _update_main_workflow),
@@ -1538,7 +1834,11 @@ def _do() -> None:
         if task_env.config.enabled(name, True):
             task(task_env)
     if task_env.on_stabilization_branches:
-        for file_ in (".github/workflows/delete-old-workflow-run.yaml", ".github/renovate.json5"):
+        for file_ in (
+            ".github/workflows/delete-old-workflow-run.yaml",
+            ".github/workflows/delete-old-workflows-run.yaml",
+            ".github/renovate.json5",
+        ):
             if os.path.exists(file_):
                 os.remove(file_)
         for file_ in glob.glob(".github/workflows/audit*.yaml"):
@@ -1550,10 +1850,15 @@ def _do() -> None:
             if os.path.exists("ci/config.yaml"):
                 with mra.EditYAML("ci/config.yaml") as config:
                     config.setdefault("checks", {})["required_workflows"] = False
+
+        for name, task in (("update-pre-commit-config", _update_pre_commit_config_stabilization_branches),):
+            if task_env.config.enabled(name, True):
+                task(task_env)
     else:
         for name, task in (
+            ("upgrade-ubuntu", _upgrade_ubuntu),
             ("update-audit-workflow", _update_audit_workflow),
-            ("update-delete-old-workflow-run-workflow", _update_delete_old_workflow_run_workflow),
+            ("update-delete-old-workflow-run-workflow", _update_delete_old_workflows_run_workflow),
             ("update-rebuild-workflow", _update_rebuild_workflow),
             ("update-pyproject-toml", _update_pyproject_toml),
             ("update-renovate-config", _update_renovate_config),
