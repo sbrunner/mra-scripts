@@ -53,6 +53,7 @@ class Config:
 
 class TaskEnv(NamedTuple):
     c2cciutils_version: version.Version
+    set_c2cciutils_version: bool
     use_python: bool
     use_pypi: bool
     use_docker: bool
@@ -187,10 +188,22 @@ def _create_labels(task_env: TaskEnv) -> None:
         )
 
 
+RE_JSON_SCHEMA_SOURCE = re.compile(
+    re.escape("# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils/")
+    + r"([0-9.]+)"
+    + re.escape("/c2cciutils/schema.json")
+)
+
+
 def _set_schema_config(task_env: TaskEnv) -> None:
-    if os.path.exists("ci/config.yaml"):
+    if os.path.exists("ci/config.yaml") and task_env.set_c2cciutils_version:
         with mra.Edit("ci/config.yaml") as ci_config:
             data = ci_config.data.split("\n")
+            # Don't do the replacement from x.y.z to x.y
+            match = RE_JSON_SCHEMA_SOURCE.match(data[0])
+            if match and match.group(1).startswith(f"{task_env.c2cciutils_version}."):
+                return
+
             if ci_config.data.startswith(
                 "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
             ):
@@ -284,20 +297,21 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     env = step.setdefault("env", {})
                                     env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
-                        if "docker login" in step.get("run", ""):
-                            has_docker_login = True
-                        if ".pypirc" in step.get("run", ""):
-                            has_pip_login = True
-                            if step.get("name", "") == "Init pypi":
-                                step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                                    "\n".join(
-                                        [
-                                            'echo "[pypi]" > ~/.pypirc',
-                                            'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                            'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                        ]
-                                    )
+                    if "docker login" in step.get("run", ""):
+                        has_docker_login = True
+                    if ".pypirc" in step.get("run", ""):
+                        has_pip_login = True
+                        if not task_env.on_stabilization_branches:
+                            step["name"] = "Init pypi"
+                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                                "\n".join(
+                                    [
+                                        'echo "[pypi]" > ~/.pypirc',
+                                        'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
+                                        'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
+                                    ]
                                 )
+                            )
 
                     if "c2cciutils-publish" in step.get("run", ""):
                         publish_index = index
@@ -309,47 +323,49 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                 }
                             )
 
-                    if not task_env.on_stabilization_branches:
-                        if (
-                            not has_pip_login
-                            and not task_env.gopass
-                            and task_env.use_pypi
-                            and publish_index >= 0
-                        ):
-                            if task_env.use_python:
-                                job["steps"] = (
-                                    job["steps"][:publish_index]
-                                    + [
-                                        {
-                                            "name": "Init pypi",
-                                            "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                                                "\n".join(
-                                                    [
-                                                        'echo "[pypi]" > ~/.pypirc',
-                                                        'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                                        'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                                    ]
-                                                )
-                                            ),
-                                        }
-                                    ]
-                                    + job["steps"][publish_index:]
-                                )
-                        if (
-                            not has_docker_login
-                            and not task_env.gopass
-                            and task_env.use_docker
-                            and publish_index >= 0
-                        ):
-                            job["steps"] = (
-                                job["steps"][:publish_index]
-                                + [
-                                    {
-                                        "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                                    }
-                                ]
-                                + job["steps"][publish_index:]
-                            )
+                print(f"Update {job.get('name', '--no-name--')}")
+                print(f"  has_pip_login: {has_pip_login}")
+                print(f"  has_docker_login: {has_docker_login}")
+                print(f"  publish_index: {publish_index}")
+                print(f"  gopass: {task_env.gopass}")
+                print(f"  use_pypi: {task_env.use_pypi}")
+                print(f"  use_docker: {task_env.use_docker}")
+                print(f"  use_python: {task_env.use_python}")
+                if not has_pip_login and not task_env.gopass and task_env.use_pypi and publish_index >= 0:
+                    if task_env.use_python:
+                        job["steps"] = (
+                            job["steps"][:publish_index]
+                            + [
+                                {
+                                    "name": "Init pypi",
+                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
+                                        "\n".join(
+                                            [
+                                                'echo "[pypi]" > ~/.pypirc',
+                                                'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
+                                                'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
+                                            ]
+                                        )
+                                    ),
+                                }
+                            ]
+                            + job["steps"][publish_index:]
+                        )
+                if (
+                    not has_docker_login
+                    and not task_env.gopass
+                    and task_env.use_docker
+                    and publish_index >= 0
+                ):
+                    job["steps"] = (
+                        job["steps"][:publish_index]
+                        + [
+                            {
+                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
+                            }
+                        ]
+                        + job["steps"][publish_index:]
+                    )
 
             publish_job = None
             for name, job in yaml["jobs"].items():
@@ -944,7 +960,8 @@ def _update_delete_old_workflows_run_workflow(task_env: TaskEnv) -> None:
             for step in job["steps"]:
                 if step.get("uses", "").startswith("MajorScruffy/delete-old-workflow-runs"):
                     step["name"] = "Delete old workflow runs"
-                    step.setdefault("env", {})["GITHUB_TOKEN"] = task_env.token
+                    # step.setdefault("env", {})["GITHUB_TOKEN"] = task_env.token
+                    step.setdefault("env", {})["GITHUB_TOKEN"] = "${{ secrets.GITHUB_TOKEN }}"
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
@@ -1019,7 +1036,10 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
     with mra.EditYAML(".github/workflows/pull-request-automation.yaml") as yaml:
         users = task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
         ci_user = task_env.config.value("CIUser", "c2c-bot-gis-ci" if task_env.gopass else "sbrunner")
-        yaml["on"] = {"pull_request": {"types": ["opened", "reopened"]}}
+        yaml["on"] = {
+            "pull_request": {"types": ["opened", "reopened", "closed"]},
+            "pull_request_target": {"types": ["closed"]},
+        }
         yaml["name"] = "Auto reviews, merge and close pull requests"
         for job in yaml["jobs"].values():
             job["name"] = "Auto reviews, merge and close pull requests"
@@ -1031,7 +1051,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
             AUTO_REVIEW_RENOVATE_UPDATES = "Auto reviews Renovate updates"
             AUTO_REVIEW_AND_MERGE_DPKG_UPDATES = "Auto review and merge dpkg updates"
             AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX = "Auto review and merge snyk auto fix"
-            RESTART_AUDIT = "Restart audit"
+            RESTART_AUDIT_WORKFLOW = "Restart audit workflow"
             AUTO_CLOSE_PRE_COMMIT_CI_AUTOUPDATE = "Auto close pre-commit.ci autoupdate"
             step_names = [
                 PRINT_EVENT,
@@ -1039,14 +1059,14 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                 AUTO_REVIEW_RENOVATE_UPDATES,
                 *([AUTO_REVIEW_AND_MERGE_DPKG_UPDATES] if os.path.exists("ci/dpkg-versions.yaml") else []),
                 AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX,
-                RESTART_AUDIT,
+                RESTART_AUDIT_WORKFLOW,
                 AUTO_CLOSE_PRE_COMMIT_CI_AUTOUPDATE,
             ]
 
             old_step = {}
             for new_step_name in step_names:
                 for step in job["steps"]:
-                    if step["name"] == new_step_name:
+                    if step.get("name") == new_step_name:
                         old_step[new_step_name] = step
                         break
 
@@ -1056,7 +1076,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                 if step["name"] == PRINT_EVENT:
                     step["run"] = 'echo "${GITHUB}" | jq'
                     step["env"] = {
-                        "GITHUB": "${{ github }}",
+                        "GITHUB": "${{ toJson(github) }}",
                     }
                 if step["name"] == PRINT_CONTEXT:
                     if not step.get("uses", "").startswith("actions/github-script@"):
@@ -1165,7 +1185,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(auto_review_merge_script)
                     }
-                if step["name"] == RESTART_AUDIT:
+                if step["name"] == RESTART_AUDIT_WORKFLOW:
                     if not step.get("uses", "").startswith("actions/github-script@"):
                         step["uses"] = "actions/github-script@v7"
                     step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
@@ -1180,6 +1200,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                                     "  ",
                                 ),
                                 "github.event.action == 'closed'",
+                                "github.event.pull_request.merged == true",
                             ]
                         )
                     )
@@ -1235,11 +1256,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                         )
                     }
 
-            if not task_env.gopass:
-                job["steps"][0]["env"] = {
-                    "GITHUB_TOKEN": task_env.token,
-                }
-
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
 
@@ -1256,8 +1272,6 @@ def _update_pull_request_checks_workflow(task_env: TaskEnv) -> None:
                     "    types:",
                     "      - opened",
                     "      - reopened",
-                    "      - labeled",
-                    "      - unlabeled",
                     "      - edited",
                     "      - synchronize",
                     "",
@@ -1282,6 +1296,13 @@ def _update_pull_request_checks_workflow(task_env: TaskEnv) -> None:
                 ]
             )
     with mra.EditYAML(".github/workflows/pr-checks.yaml") as yaml:
+        yaml.setdefault("on", {}).setdefault("pull_request", {})["types"] = [
+            "opened",
+            "reopened",
+            "edited",
+            "synchronize",
+        ]
+
         if "attrs" not in yaml["jobs"]["build"]["steps"][0].get("run", ""):
             yaml["jobs"]["build"]["steps"].insert(
                 0,
@@ -1770,6 +1791,7 @@ def _get_env() -> TaskEnv:
 
     # Get the version of c2cciutils
     c2cciutils_version = version.parse("1.6.0")
+    set_c2cciutils_version = False
     if os.path.exists("ci/requirements.txt"):
         with mra.Edit("ci/requirements.txt") as requirements_txt:
             requirements = [
@@ -1782,9 +1804,15 @@ def _get_env() -> TaskEnv:
                 if c2cciutils_version_string.endswith(".*"):
                     c2cciutils_version_string = c2cciutils_version_string[:-2]
                 c2cciutils_version = version.parse(c2cciutils_version_string)
+                set_c2cciutils_version = True
     c2cciutils_version_config = config.value("c2cciutils_version")
     if c2cciutils_version_config:
-        c2cciutils_version = version.parse(c2cciutils_version_config)
+        if c2cciutils_version_config == "master":
+            c2cciutils_version = version.parse("1.6.0")
+            set_c2cciutils_version = False
+        else:
+            c2cciutils_version = version.parse(c2cciutils_version_config)
+            set_c2cciutils_version = True
 
     use_python = False
     for pyproject_filename in ("pyproject.toml", "app/pyproject.toml", "api/pyproject.toml"):
@@ -1804,6 +1832,7 @@ def _get_env() -> TaskEnv:
 
     return TaskEnv(
         c2cciutils_version,
+        set_c2cciutils_version,
         use_python,
         use_pypi,
         use_docker,
@@ -1846,9 +1875,14 @@ def _do() -> None:
         for file_ in glob.glob(".github/workflows/rebuild*.yaml"):
             os.remove(file_)
 
-        if task_env.c2cciutils_version.major == 1 and task_env.c2cciutils_version.minor <= 3:
-            if os.path.exists("ci/config.yaml"):
-                with mra.EditYAML("ci/config.yaml") as config:
+        if not os.path.exists("ci/config.yaml"):
+            with open("ci/config.yaml", "w", encoding="utf-8") as config:
+                config.write("{}")
+
+        with mra.EditYAML("ci/config.yaml") as config:
+            if config.get("checks") is not False:
+                config.setdefault("checks", {})["codespell"] = False
+                if task_env.c2cciutils_version.major == 1 and task_env.c2cciutils_version.minor <= 3:
                     config.setdefault("checks", {})["required_workflows"] = False
 
         for name, task in (("update-pre-commit-config", _update_pre_commit_config_stabilization_branches),):
@@ -1870,6 +1904,15 @@ def _do() -> None:
 
 
 if __name__ == "__main__":
+    # edit the file /home/sbrunner/workspace/docker-vim/.github/workflows/changelog.yaml
+    # with mra.EditYAML("/home/sbrunner/workspace/docker-vim/.github/workflows/audit.yaml") as e:
+    #    _canonicalize_workflow(e)
+    # with mra.EditYAML("/home/sbrunner/workspace/docker-vim/.github/workflows/changelog.yaml") as e:
+    #    _canonicalize_workflow(e)
+    # exit(0)
+
+    os.environ["IGNORE_CONFIG_ERROR"] = "true"
+
     mra.main(
         _do,
         # pull_request_on_stabilization_branches
