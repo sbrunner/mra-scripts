@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 
+import os
+
 import c2cciutils.security
 import multi_repo_automation as mra
 import requests
@@ -19,7 +21,11 @@ from ruamel.yaml import YAML
 
 
 def _do() -> None:
-    mra.run([mra.get_browser(), f"https://github.com/{mra.get_repo_config()['name']}/settings/branches"])
+    if os.path.exists("poetry.lock"):
+        mra.run(["poetry", "install"], check=False)
+
+
+#    mra.run([mra.get_browser(), f"https://github.com/{mra.get_repo_config()['name']}/settings/actions"])
 
 
 if __name__ == "__main__":
