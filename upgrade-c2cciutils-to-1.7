@@ -280,34 +280,39 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                     ):
                         has_publish_artifacts = True
 
+                index_add = 0
                 for index, filename, has_artifact, artifact_name in (
                     (pre_commit_index, "pre-commit", has_pre_commit_artifacts, "Apply pre-commit fix"),
                     (publish_index, "dpkg-versions", has_publish_artifacts, "Update dpkg versions list"),
                 ):
                     if index >= 0:
                         if not task_env.on_stabilization_branches:
-                            if job["steps"][index].get("env", {}).get("SKIP", "").strip(",") == "poetry-lock":
-                                del job["steps"][index]["env"]["SKIP"]
-                                if not job["steps"][index]["env"]:
-                                    del job["steps"][index]["env"]
-                        if len(job["steps"]) > index + 1 and job["steps"][index + 1].get(
-                            "run", ""
-                        ).startswith("git diff"):
-                            job["steps"][index + 1][
+                            if (
+                                job["steps"][index + index_add].get("env", {}).get("SKIP", "").strip(",")
+                                == "poetry-lock"
+                            ):
+                                del job["steps"][index + index_add]["env"]["SKIP"]
+                                if not job["steps"][index + index_add]["env"]:
+                                    del job["steps"][index + index_add]["env"]
+                        if len(job["steps"]) > index + index_add + 1 and job["steps"][
+                            index + index_add + 1
+                        ].get("run", "").startswith("git diff"):
+                            job["steps"][index + index_add + 1][
                                 "run"
                             ] = f"git diff --exit-code --patch > /tmp/{filename}.patch || true"
-                            job["steps"][index + 1]["if"] = "failure()"
+                            job["steps"][index + index_add + 1]["if"] = "failure()"
                         else:
                             job["steps"].insert(
-                                index + 1,
+                                index + index_add + 1,
                                 {
                                     "run": f"git diff --exit-code --patch > /tmp/{filename}.patch || true",
                                     "if": "failure()",
                                 },
                             )
+                            index_add += 1
                         if not has_artifact and index >= 0:
                             job["steps"].insert(
-                                index + 2,
+                                index + index_add + 1,
                                 {
                                     "uses": "actions/upload-artifact@v4",
                                     "with": {
@@ -318,6 +323,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     "if": "failure()",
                                 },
                             )
+                            index_add += 1
 
                 has_pip_login = False
                 has_docker_login = False
@@ -624,14 +630,13 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
             )
     with mra.EditYAML(".github/workflows/pull-request-automation.yaml") as yaml:
         task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
-        ci_user = task_env.config.value("CIUser", "c2c-bot-gis-ci-2" if task_env.gopass else "sbrunner")
+        yaml["name"] = "Auto reviews pull requests from bots"
         yaml["on"] = {
-            "pull_request": {"types": ["opened", "reopened", "closed"]},
-            "pull_request_target": {"types": ["closed"]},
+            "pull_request": {"types": ["opened", "reopened"]},
         }
         yaml["name"] = "Auto reviews, merge and close pull requests"
         for job in yaml["jobs"].values():
-            job["name"] = "Auto reviews, merge and close pull requests"
+            job["name"] = "Auto reviews pull requests from bots"
             if "if" in job:
                 del job["if"]
 
@@ -646,7 +651,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                 PRINT_CONTEXT,
                 AUTO_REVIEW_GHCI_UPDATES,
                 AUTO_REVIEW_RENOVATE_UPDATES,
-                *([AUTO_REVIEW_AND_MERGE_DPKG_UPDATES] if os.path.exists("ci/dpkg-versions.yaml") else []),
             ]
 
             old_step = {}
@@ -664,6 +668,14 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                     auto_review_and_merge_snyk_auto_fix_index = index
             if auto_review_and_merge_snyk_auto_fix_index >= 0:
                 del job["steps"][auto_review_and_merge_snyk_auto_fix_index]
+
+            auto_review_and_merge_dpkg_update_index = -1
+            for index, step in enumerate(job["steps"]):
+                if step["name"] == AUTO_REVIEW_AND_MERGE_DPKG_UPDATES:
+                    auto_review_and_merge_dpkg_update_index = index
+            if auto_review_and_merge_dpkg_update_index >= 0:
+                del job["steps"][auto_review_and_merge_dpkg_update_index]
+
             for step in job["steps"]:
                 if step["name"] == PRINT_EVENT:
                     step["run"] = 'echo "${GITHUB}" | jq'
@@ -691,14 +703,10 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                                 "startsWith(github.head_ref, 'ghci/audit/')",
                                 safe_or(
                                     [
-                                        f"github.event.pull_request.user.login == 'ghci-test[bot]'",
-                                        f"github.event.pull_request.user.login == 'ghci-int[bot]'",
-                                        f"github.event.pull_request.user.login == 'ghci[bot]'",
+                                        f"github.event.pull_request.user.login == 'geo-ghci-test[bot]'",
+                                        f"github.event.pull_request.user.login == 'geo-ghci-int[bot]'",
+                                        f"github.event.pull_request.user.login == 'geo-ghci[bot]'",
                                     ],
-                                    "  ",
-                                ),
-                                safe_or(
-                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
                                     "  ",
                                 ),
                             ]
@@ -722,15 +730,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                     if not step.get("uses", "").startswith("actions/github-script@"):
                         step["uses"] = "actions/github-script@v7"
                     step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                        _and(
-                            [
-                                f"github.event.pull_request.user.login == 'renovate[bot]'",
-                                safe_or(
-                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
-                                    "  ",
-                                ),
-                            ]
-                        )
+                        f"github.event.pull_request.user.login == 'renovate[bot]'",
                     )
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
@@ -770,46 +770,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                         "`)",
                     ]
                 )
-
-                if step["name"] == AUTO_REVIEW_AND_MERGE_DPKG_UPDATES:
-                    if not step.get("uses", "").startswith("actions/github-script@"):
-                        step["uses"] = "actions/github-script@v7"
-                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                        _and(
-                            [
-                                f"github.event.pull_request.user.login == '{ci_user}'",
-                                "startsWith(github.head_ref, 'dpkg-update/')",
-                                safe_or(
-                                    [
-                                        "github.event.action == 'opened'",
-                                        "github.event.action == 'reopened'",
-                                    ],
-                                    "  ",
-                                ),
-                            ]
-                        )
-                    )
-                    step["with"] = {
-                        "script": ruamel.yaml.scalarstring.LiteralScalarString(auto_review_merge_script)
-                    }
-                if step["name"] == AUTO_REVIEW_AND_MERGE_SNYK_AUTO_FIX:
-                    if not step.get("uses", "").startswith("actions/github-script@"):
-                        step["uses"] = "actions/github-script@v7"
-                    step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                        _and(
-                            [
-                                f"github.event.pull_request.user.login == '{ci_user}'",
-                                "startsWith(github.head_ref, 'snyk-fix/')",
-                                safe_or(
-                                    ["github.event.action == 'opened'", "github.event.action == 'reopened'"],
-                                    "  ",
-                                ),
-                            ]
-                        )
-                    )
-                    step["with"] = {
-                        "script": ruamel.yaml.scalarstring.LiteralScalarString(auto_review_merge_script)
-                    }
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
@@ -931,7 +891,9 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                             and "python_version" in pyproject["tool"]["mypy"]
                         ):
                             pyproject["tool"]["mypy"]["python_version"] = str(
-                                pyproject["tool"]["mypy"]["python_version"]
+                                "3.10"
+                                if pyproject["tool"]["mypy"]["python_version"] == 3.1
+                                else pyproject["tool"]["mypy"]["python_version"]
                             )
 
                         for plugin in (
@@ -1354,7 +1316,11 @@ def _get_env() -> TaskEnv:
 
 
 def _ghci_updates(task_env: TaskEnv) -> None:
-    if task_env.use_helm and not os.path.exists(".github/ghci.yaml"):
+    if (
+        task_env.use_helm
+        and not os.path.exists(".github/ghci.yaml")
+        and not task_env.on_stabilization_branches
+    ):
         with open(".github/ghci.yaml", "w", encoding="utf-8") as ghci:
             ghci.write(
                 """# yaml-language-server: $schema=https://geoservices-int.camptocamp.com/github/schema.json
