@@ -61,6 +61,7 @@ class TaskEnv(NamedTuple):
     has_config: bool
     has_stabilization_branches: bool
     on_stabilization_branches: bool
+    stabilization_branches: list[str]
     gopass: bool
     token: str
     config: Config
@@ -238,6 +239,37 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
                 print(f"Error in {workflow_file}: {e}")
 
 
+def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
+    # Update for Python 3.12
+    # pip install match
+    pip_install_re = re.compile(r"\bpip install\b")
+    for job in yaml["jobs"].values():
+        setup_index = -1
+        install_index = -1
+        echo_index = -1
+        for index, step in enumerate(job["steps"]):
+            if "pip install " in step.get("run", "") and " --user " in step.get("run", ""):
+                step["run"] = step["run"].replace(" --user ", " ")
+            if install_index < 0 and pip_install_re.search(step.get("run", "")):
+                install_index = index
+            if setup_index < 0 and step.get("uses", "").startswith("actions/setup-python@"):
+                setup_index = index
+            if echo_index < 0 and step.get("run", "") == 'echo "${HOME}/.local/bin" >> ${GITHUB_PATH}':
+                echo_index = index
+        if install_index >= 0 and setup_index < 0:
+            job["steps"].insert(
+                install_index,
+                {
+                    "uses": "actions/setup-python@v5",
+                    "with": {
+                        "python-version": "3.11",
+                    },
+                },
+            )
+        if echo_index >= 0:
+            del job["steps"][echo_index]
+
+
 def _update_main_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/workflows/codeql.yaml"):
         os.remove(".github/workflows/codeql.yaml")
@@ -245,19 +277,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
         os.rename(".github/workflows/ci.yaml", ".github/workflows/main.yaml")
     if os.path.exists(".github/workflows/main.yaml"):
         with mra.EditYAML(".github/workflows/main.yaml") as yaml:
-            if not task_env.on_stabilization_branches:
-                env = yaml.setdefault("env", {})
-                if "HAS_SECRETS" not in env:
-                    env["HAS_SECRETS"] = "${{ secrets.HAS_SECRETS }}"
-
-                    if hasattr(env, "ca"):
-                        env.ca.items.clear()
-                        env.ca.items["HAS_SECRETS"] = [
-                            None,
-                            None,
-                            ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
-                            None,
-                        ]
+            _update_workflow_venv(task_env, yaml)
 
             for job in yaml["jobs"].values():
                 pre_commit_index = -1
@@ -325,8 +345,6 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             )
                             index_add += 1
 
-                has_pip_login = False
-                has_docker_login = False
                 publish_index = -1
 
                 for index, step in enumerate(job["steps"]):
@@ -357,91 +375,20 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     env = step.setdefault("env", {})
                                     env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
-                    if "docker login" in step.get("run", ""):
-                        has_docker_login = True
-                    if ".pypirc" in step.get("run", ""):
-                        has_pip_login = True
-                        if not task_env.on_stabilization_branches:
-                            step["name"] = "Init pypi"
-                            step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                                "\n".join(
-                                    [
-                                        'echo "[pypi]" > ~/.pypirc',
-                                        'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                        'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                    ]
-                                )
-                            )
-
-                    if "c2cciutils-publish" in step.get("run", ""):
-                        publish_index = index
-                        if not task_env.gopass:
-                            step.setdefault("env", {}).update(
-                                {
-                                    "GITHUB_TOKEN": task_env.token,
-                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
-                            )
-                        elif "env" in step:
-                            if "GITHUB_TOKEN" in step["env"]:
-                                del step["env"]["GITHUB_TOKEN"]
-                            if "SNYK_TOKEN" in step["env"]:
-                                del step["env"]["SNYK_TOKEN"]
-                            if not step["env"]:
-                                del step["env"]
-
-                print(f"Update {job.get('name', '--no-name--')}")
-                print(f"  has_pip_login: {has_pip_login}")
-                print(f"  has_docker_login: {has_docker_login}")
-                print(f"  publish_index: {publish_index}")
-                print(f"  gopass: {task_env.gopass}")
-                print(f"  use_pypi: {task_env.use_pypi}")
-                print(f"  use_docker: {task_env.use_docker}")
-                print(f"  use_python: {task_env.use_python}")
-                if not has_pip_login and not task_env.gopass and task_env.use_pypi and publish_index >= 0:
-                    if task_env.use_python:
-                        job["steps"] = (
-                            job["steps"][:publish_index]
-                            + [
-                                {
-                                    "name": "Init pypi",
-                                    "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                                        "\n".join(
-                                            [
-                                                'echo "[pypi]" > ~/.pypirc',
-                                                'echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc',
-                                                'echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc',
-                                            ]
-                                        )
-                                    ),
-                                }
-                            ]
-                            + job["steps"][publish_index:]
-                        )
-                if (
-                    not has_docker_login
-                    and not task_env.gopass
-                    and task_env.use_docker
-                    and publish_index >= 0
-                ):
-                    job["steps"] = (
-                        job["steps"][:publish_index]
-                        + [
-                            {
-                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                            }
-                        ]
-                        + job["steps"][publish_index:]
-                    )
-
             if not task_env.on_stabilization_branches or yaml.is_modified():
                 _canonicalize_workflow(yaml)
 
 
 def _update_audit_workflow(task_env: TaskEnv) -> None:
-    pass
-    # if os.path.exists(".github/workflows/audit.yaml"):
-    #    os.remove(".github/workflows/audit.yaml")
+    if os.path.exists(".github/workflows/audit.yaml"):
+        #    os.remove(".github/workflows/audit.yaml")
+
+        with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
+            for job in yaml["jobs"].values():
+                for index, step in list(enumerate(job["steps"])):
+                    if "c2cciutils-docker-versions-update" in step.get("run", ""):
+                        del job["steps"][index]
+                        break
 
 
 def _update_changelog_workflow(task_env: TaskEnv) -> None:
@@ -458,101 +405,9 @@ def _update_clean_workflow(task_env: TaskEnv) -> None:
         if os.path.exists(".github/workflows/clean.yaml"):
             os.remove(".github/workflows/clean.yaml")
         return
-    if not os.path.exists(".github/workflows/clean.yaml"):
-        with mra.Edit(".github/workflows/clean.yaml") as text:
-            text.data = "\n".join(
-                [
-                    "name: Clean docker hub tags",
-                    "",
-                    "on:",
-                    "  delete:",
-                    "  pull_request:",
-                    "    types:",
-                    "      - closed",
-                    "",
-                    "jobs:",
-                    "  clean:",
-                    "    runs-on: ubuntu-22.04",
-                    "    name: Clean docker hub tags",
-                    "    timeout-minutes: 5",
-                    "",
-                    "    steps:",
-                    "      - uses: actions/checkout@v4",
-                    "",
-                    "      - uses: camptocamp/initialise-gopass-summon-action@v2",
-                    "        with:",
-                    "          ci-gpg-private-key: ${{secrets.CI_GPG_PRIVATE_KEY}}",
-                    "          github-gopass-ci-token: ${{secrets.GOPASS_CI_GITHUB_TOKEN}}",
-                    "          patterns: docker",
-                    "",
-                    '      - run: echo "${HOME}/.local/bin" >> ${GITHUB_PATH}',
-                    "      - run: python3 -m pip install --user --requirement=ci/requirements.txt",
-                    "",
-                    "      - name: Clean Docker hub tags",
-                    "        run: c2cciutils-clean",
-                ]
-            )
-    with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
-        if task_env.gopass:
-            gopass_init = False
-            checkout_index = -1
-            job_config = None
-            for job in yaml["jobs"].values():
-                for index, step in enumerate(job["steps"]):
-                    if step.get("uses", "").startswith("actions/checkout@"):
-                        checkout_index = index
-                        job_config = job
-                    if step.get("uses", "").startswith("camptocamp/initialise-gopass-summon-action@"):
-                        gopass_init = True
-
-            if not gopass_init:
-                assert job_config is not None
-                job_config["steps"].insert(
-                    checkout_index + 1,
-                    {
-                        "uses": "camptocamp/initialise-gopass-summon-action@v2",
-                        "with": {
-                            "ci-gpg-private-key": "${{secrets.CI_GPG_PRIVATE_KEY}}",
-                            "github-gopass-ci-token": task_env.token,
-                        },
-                    },
-                )
-                job_config["steps"].ca.items[checkout_index] = [
-                    None,
-                    None,
-                    [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
-                    None,
-                ]
-                job_config["steps"].ca.items[checkout_index + 1] = [
-                    None,
-                    None,
-                    [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
-                    None,
-                ]
-        else:
-            gopass_index = -1
-            for job in yaml["jobs"].values():
-                for index, step in enumerate(job["steps"]):
-                    if step.get("uses", "").startswith("camptocamp/initialise-gopass-summon-action@"):
-                        gopass_index = index
-            if gopass_index >= 0:
-                for job in yaml["jobs"].values():
-                    del job["steps"][gopass_index]
-
-        for job in yaml["jobs"].values():
-            for step in job["steps"]:
-                if "c2cciutils-clean" in step.get("run", ""):
-                    step["name"] = "Clean Docker hub tags"
-                    if not task_env.gopass:
-                        step.setdefault("env", {}).update(
-                            {
-                                "DOCKERHUB_PASSWORD": "${{ secrets.DOCKER_PASSWORD }}",
-                                "DOCKERHUB_USERNAME": "${{ secrets.DOCKER_USERNAME }}",
-                            }
-                        )
-
-        if not task_env.on_stabilization_branches or yaml.is_modified():
-            _canonicalize_workflow(yaml)
+    if os.path.exists(".github/workflows/clean.yaml"):
+        with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
+            _update_workflow_venv(task_env, yaml)
 
 
 def _update_delete_old_workflows_run_workflow(task_env: TaskEnv) -> None:
@@ -787,80 +642,6 @@ def _update_backport_workflow(task_env: TaskEnv) -> None:
         if os.path.exists(".github/workflows/backport.yaml"):
             os.remove(".github/workflows/backport.yaml")
         return
-    if not os.path.exists(".github/workflows/backport.yaml"):
-        with mra.Edit(".github/workflows/backport.yaml") as text:
-            text.data = "\n".join(
-                [
-                    "name: Backport",
-                    "",
-                    "on:",
-                    "  pull_request:",
-                    "    types:",
-                    "      - closed",
-                    "      - labeled",
-                    "",
-                    "env:",
-                    "  HAS_SECRETS: ${{ secrets.HAS_SECRETS }}",
-                    "",
-                    "jobs:",
-                    "  backport:",
-                    "    runs-on: ubuntu-22.04",
-                    "    name: Backport",
-                    "    timeout-minutes: 5",
-                    "",
-                    "    steps:",
-                    "      - uses: camptocamp/backport-action@master",
-                    "        with:",
-                    "          token: ${{ secrets.GOPASS_CI_GITHUB_TOKEN }}",
-                    "        if: env.HAS_SECRETS == 'HAS_SECRETS'",
-                ]
-            )
-    with mra.EditYAML(".github/workflows/backport.yaml") as yaml:
-        for job in yaml["jobs"].values():
-            for step in job["steps"]:
-                if step.get("uses", "") == "camptocamp/backport-action@master":
-                    step.setdefault("with", {})["token"] = task_env.token
-
-        if not task_env.on_stabilization_branches or yaml.is_modified():
-            _canonicalize_workflow(yaml)
-
-
-def _update_rebuild_workflow(task_env: TaskEnv) -> None:
-    if os.path.exists(".github/workflows/rebuild.yaml"):
-        should_be_removed = False
-        with mra.EditYAML(".github/workflows/rebuild.yaml") as yaml:
-            for job in yaml["jobs"].values():
-                if "master" in job.get("strategy", {}).get("matrix", {}).get("branch", []):
-                    job["strategy"]["matrix"]["branch"].remove("master")
-                should_be_removed = not job["strategy"]["matrix"]["branch"]
-
-                for step in job["steps"]:
-                    if step.get("run", "") == "c2cciutils-checks":
-                        if not task_env.gopass:
-                            env = step.setdefault("env", {})
-                            env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
-
-                    if "c2cciutils-publish" in step.get("run", ""):
-                        if not task_env.gopass:
-                            step.setdefault("env", {}).update(
-                                {
-                                    "GITHUB_TOKEN": task_env.token,
-                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
-                            )
-                        elif "env" in step:
-                            if "GITHUB_TOKEN" in step["env"]:
-                                del step["env"]["GITHUB_TOKEN"]
-                            if "SNYK_TOKEN" in step["env"]:
-                                del step["env"]["SNYK_TOKEN"]
-                            if not step["env"]:
-                                del step["env"]
-
-            if not task_env.on_stabilization_branches or yaml.is_modified():
-                _canonicalize_workflow(yaml)
-
-        if should_be_removed:
-            os.remove(".github/workflows/rebuild.yaml")
 
 
 def _update_pyproject_toml(task_env: TaskEnv) -> None:
@@ -895,29 +676,30 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                                 if pyproject["tool"]["mypy"]["python_version"] == 3.1
                                 else pyproject["tool"]["mypy"]["python_version"]
                             )
-
-                        for plugin in (
-                            "poetry-dynamic-versioning",
-                            "poetry-plugin-tweak-dependencies-version",
-                            "poetry-plugin-drop-python-upper-constraint",
-                        ):
-                            if plugin not in pyproject["build-system"]["requires"]:
-                                pyproject.data["build-system"]["requires"].append(plugin)
-                        for requirements_file_name in ("requirements.txt", "ci/requirements.txt"):
-                            if os.path.exists(requirements_file_name):
-                                with mra.Edit(requirements_file_name) as requirements_txt:
+                        version_splitter = re.compile("[<>=]+")
+                        [version_splitter.split(p)[0] for p in pyproject["build-system"]["requires"]]
+                        for requirements_file_name_candidate in ("requirements.txt", "ci/requirements.txt"):
+                            if os.path.exists(requirements_file_name_candidate):
+                                with mra.Edit(requirements_file_name_candidate) as requirements_txt:
                                     if "poetry" in requirements_txt.data:
-                                        for plugin, plugin_version in (
-                                            ("poetry-dynamic-versioning", "1.1.0"),
-                                            ("poetry-plugin-export", "1.6.0"),
-                                            ("poetry-plugin-tweak-dependencies-version", "1.5.2"),
-                                            ("poetry-plugin-drop-python-upper-constraint", "0.1.0"),
-                                        ):
-                                            if (
-                                                f"{plugin}==" not in requirements_txt.data
-                                                and f"{plugin}[" not in requirements_txt.data
-                                            ):
-                                                requirements_txt.data += f"{plugin}=={plugin_version}\n"
+                                        break
+                        # for dependency, plugin, plugin_version in (
+                        #     (True, "poetry-dynamic-versioning", "1.1.0"),
+                        #     (True, "poetry-plugin-tweak-dependencies-version", "1.5.2"),
+                        #     (True, "poetry-plugin-drop-python-upper-constraint", "0.1.0"),
+                        #     (False, "poetry-plugin-export", "1.6.0"),
+                        # ):
+                        #     requirement = not dependency
+                        #     if dependency and plugin not in build_system_requires_no_version:
+                        #         pyproject.data["build-system"]["requires"].append(plugin)
+                        #         requirement = True
+                        #     if requirement and requirement_file_name:
+                        #         with mra.Edit(requirements_file_name) as requirements_txt:
+                        #                     if (
+                        #                         f"{plugin}==" not in requirements_txt.data
+                        #                         and f"{plugin}[" not in requirements_txt.data
+                        #                     ):
+                        #                         requirements_txt.data += f"{plugin}=={plugin_version}\n"
 
                         poetry_dynamic_versioning = pyproject.setdefault("tool", {}).setdefault(
                             "poetry-dynamic-versioning", {}
@@ -956,189 +738,79 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 renovate_config.data = "{}"
 
     with mra.EditRenovateConfigV2() as renovate_config:
-        renovate_config.setdefault("extends", ["config:base"])
-
-        if renovate_config.get("extends", []) == ["config:base"]:
-            renovate_config["extends"] = [
+        renovate_config.setdefault(
+            "extends",
+            [
                 ":dependencyDashboard",
                 "group:monorepos",
                 "group:recommended",
                 "replacements:all",
                 "workarounds:all",
-            ]
-
-        renovate_config.setdefault("timezone", "Europe/Zurich")
-        renovate_config["schedule"] = "after 5pm on the first day of the month"
-        renovate_config.setdefault("labels", ["dependencies"])
-        renovate_config.setdefault("separateMajorMinor", True)
-        renovate_config.setdefault("separateMinorPatch", True)
-        renovate_config.setdefault("prHourlyLimit", 0)
-        renovate_config.setdefault("prConcurrentLimit", 0)
-        renovate_config.setdefault(
-            "lockFileMaintenance",
-            {
-                "enabled": True,
-                "automerge": True,
-                "schedule": "after 5pm on the first day of the month",
-            },
+            ],
         )
 
-        # Fix escapes
-        for regex_manager in renovate_config.data.get("regexManagers", []):
-            file_match = regex_manager["fileMatch"]
-            match_strings = regex_manager["matchStrings"]
-            if isinstance(file_match, mra.JSON5RowAttribute):
-                if re.search(
-                    r"\\*.pre-commit-config\\*.yaml",
-                    json5.dumps(file_match.value),
-                ):
-                    file_match.value = [f'^{re.escape(".pre-commit-config.yaml")}$']
-                if re.search(
-                    r"ci/dpkg-versions\\*.yaml",
-                    json5.dumps(file_match.value),
-                ):
-                    file_match.value = [f'^{re.escape("ci/dpkg-versions.yaml")}$']
-                # if re.search(
-                #    r"ci/config\\*.yaml",
-                #    json5.dumps(file_match.value),
-                # ):
-                #    file_match.value = [f'^{re.escape("ci/config.yaml")}$']
-            if isinstance(match_strings, mra.JSON5List) and re.search(
-                r"\.\*https://raw\\*.githubusercontent\\*.com/(\?<depName>[^\\*s]+)/(\?<currentValue>[0-9\\*.]\+)/\.\*",
-                json5.dumps(regex_manager["matchStrings"][0].value),
-            ):
-                regex_manager["matchStrings"][
-                    0
-                ].value = (
-                    r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*"
+        renovate_config.remove_package_rule({}, ["Update dpkg versions at any time"])
+        if task_env.has_stabilization_branches:
+            if task_env.stabilization_branches == ["master"]:
+                renovate_config.add_package_rule(
+                    {
+                        "minimumReleaseAge": "7 days",
+                    },
+                    ["For security reason don't takes the too early packages"],
+                )
+            else:
+                renovate_config.remove_package_rule(
+                    {},
+                    ["For security reason don't takes the too early packages on stabilization branches"],
+                )
+                print(task_env.config)
+                renovate_config.add_package_rule(
+                    {
+                        "matchBaseBranches": task_env.config.value(
+                            "matchStabilizationBranches",
+                            task_env.config.repo.get("match_stabilization_branches", [r"/^[0-9]+\.[0-9]+$/"]),
+                        ),
+                        "minimumReleaseAge": "7 days",
+                    },
+                    [
+                        "Packages published very recently are not pushed to stabilization branches for security reasons"
+                    ],
                 )
 
-        renovate_config["schedule"] = "after 5pm on the first day of the month"
-        if os.path.exists(".pre-commit-config.yaml"):
-            preCommit = mra.JSON5RowDict()
-            preCommit.comment = ["Do updates on pre-commit config"]
-            preCommit.value = {"enabled": True}
+        if not task_env.has_stabilization_branches or task_env.stabilization_branches == ["master"]:
+            if "baseBranches" in renovate_config:
+                del renovate_config["baseBranches"]
+            renovate_config.remove_package_rule({}, ["Accept only the patch on stabilization branches"])
+            renovate_config.remove_package_rule({}, ["Accept only the patch on the stabilization branches"])
 
-            renovate_config.add_regex_manager(
-                {
-                    "fileMatch": [f'^{re.escape(".pre-commit-config.yaml")}$'],
-                    "matchStrings": [
-                        " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"
-                    ],
-                },
-                ["Do updates on pre-commit additional dependencies"],
-            )
-        # No more do update on packages update (trigger a rebuild)
-        renovate_config.remove_regex_manager(
-            {
-                "fileMatch": [f'^{re.escape("ci/dpkg-versions.yaml")}$'],
-                "matchStrings": [r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"],
-                "datasourceTemplate": "repology",
-                "versioningTemplate": "loose",
-            },
-            ["Do update on packages update (trigger a rebuild)"],
-        )
-        # Do update on the schema present in the ci/config.yaml
         renovate_config.add_regex_manager(
             {
-                "fileMatch": [f'^{re.escape("ci/config.yaml")}$'],
+                "fileMatch": ["^\\.github/workflows/.*\\.yaml$"],
                 "matchStrings": [
-                    r".*https://raw\.githubusercontent\.com/(?<depName>[^\s]+)/(?<currentValue>[0-9\.]+)/.*",
+                    " python-version: ['\"](?<currentValue>[0-9\\.]+)['\"]",
                 ],
-                "datasourceTemplate": "github-tags",
+                "datasourceTemplate": "python-version",
+                "depNameTemplate": "python",
             },
-            ["Do update on the schema present in the ci/config.yaml"],
-        )
-        # Support the 4 parts of shellcheck-py version
-        renovate_config.add_package_rule(
-            {
-                "matchPackageNames": ["shellcheck-py/shellcheck-py"],
-                "versioning": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)\\.(?<build>\\d+)$",
-            },
-            ["Support the 4 parts of shellcheck-py version with a v prefix"],
+            ["Python version in actions/setup-python action"],
         )
         renovate_config.add_package_rule(
             {
-                "matchDepTypes": ["devDependencies"],
-                "automerge": True,
+                "matchDepNames": ["python"],
+                "groupName": "Python",
             },
-            ["Auto merge the dev dependency update"],
-        )
-        renovate_config.add_package_rule(
-            {
-                "matchUpdateTypes": ["patch"],
-                "groupName": "all patch versions",
-                "automerge": True,
-            },
-            ["Group and auto merge the patch updates"],
-            ["matchUpdateTypes", "groupName"],
-        )
-        renovate_config.add_package_rule(
-            {
-                "matchUpdateTypes": ["minor"],
-                "groupName": "all minor versions",
-                "automerge": True,
-            },
-            ["Group and auto merge the minor updates"],
-            ["matchUpdateTypes", "groupName"],
-        )
-        if task_env.has_stabilization_branches:
+            ["Ungroup Python dependencies"],
+        ),
+
+        renovate_config.remove_package_rule({}, ["In file .python-version, use the <major>.<minor> version"])
+        if os.path.exists(".python-version"):
             renovate_config.add_package_rule(
                 {
-                    "matchBaseBranches": task_env.config.value(
-                        "matchStabilizationBranches", [r"/^[0-9]+\.[0-9]+$/"]
-                    ),
-                    "matchUpdateTypes": [
-                        "major",
-                        "minor",
-                        "pin",
-                        "digest",
-                        "lockFileMaintenance",
-                        "rollback",
-                        "bump",
-                    ],
-                    "enabled": False,
+                    matchFileNames: [".python-version"],
+                    versioning: "regex:^(?<major>\\d+)\\.(?<minor>\\d+)$",
                 },
-                ["Accept only the patch on stabilization branches"],
-                ["matchUpdateTypes"],
+                ["In file `.python-version`, use the `<major>.<minor>` version"],
             )
-
-        if task_env.use_python:
-            renovate_config.add_package_rule(
-                {
-                    "matchPackageNames": ["poetry", "pip"],
-                    "matchPackagePrefixes": ["poetry-"],
-                    "groupName": "Poetry",
-                    "automerge": True,
-                },
-                ["Group Poetry packages"],
-            )
-        if task_env.use_docker and task_env.has_stabilization_branches:
-            # No more update dpkg versions every day
-            renovate_config.remove_package_rule(
-                {
-                    "groupName": "dpkg",
-                },
-                ["Update dpkg versions at any time"],
-            )
-
-        renovate_config.remove_package_rule(
-            {"matchDatasources": ["github-actions", "pre-commit"], "automerge": True},
-            ["Auto merge the GitHub action and pre-commit updates"],
-        )
-        renovate_config.add_package_rule(
-            {
-                "matchFileNames": [".github/**", ".pre-commit-config.yaml", "ci/**"],
-                "groupName": "CI dependencies",
-                "automerge": True,
-            },
-            ["Group and auto merge the CI dependencies"],
-        )
-
-        for package_rule in renovate_config.data.get("packageRules", []):
-            if "matchPackageNames" in package_rule:
-                package_rule["matchDepNames"] = package_rule["matchPackageNames"]
-                del package_rule["matchPackageNames"]
 
 
 def _update_config(task_env: TaskEnv) -> None:
@@ -1175,14 +847,15 @@ def _update_config(task_env: TaskEnv) -> None:
 def _update_pre_commit_config(task_env: TaskEnv) -> None:
     if os.path.exists(".pre-commit-config.yaml"):
         with mra.EditPreCommitConfig() as pre_commit_config:
-            pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
+            if "ci" in pre_commit_config:
+                del pre_commit_config["ci"]
+
+            pre_commit_config.add_repo("https://github.com/renovatebot/pre-commit-hooks", "37.428.1")
             pre_commit_config.add_hook(
-                "https://github.com/sbrunner/jsonschema-validator",
+                "https://github.com/renovatebot/pre-commit-hooks",
                 {
-                    "id": "jsonschema-validator",
-                    "files": pre_commit_config.create_files_regex(["ci/config\\.yaml"]),
+                    "id": "renovate-config-validator",
                 },
-                True,
             )
 
             # Do a spell check on the found schemas
@@ -1203,7 +876,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                 ]
 
             if schemas:
-                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "master")
+                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "v2.2.0")
                 pre_commit_config.add_hook(
                     "https://github.com/mheap/json-schema-spell-checker",
                     {
@@ -1218,21 +891,6 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         ],
                     },
                 )
-    _update_pre_commit_config_stabilization_branches(task_env)
-
-
-def _update_pre_commit_config_stabilization_branches(task_env: TaskEnv) -> None:
-    del task_env
-
-    if os.path.exists(".pre-commit-config.yaml"):
-        with mra.EditPreCommitConfig() as pre_commit_config:
-            for repo in pre_commit_config.data["repos"]:
-                # Fucking branch renaming
-                if (
-                    repo.get("repo", "") == "https://github.com/mheap/json-schema-spell-checker"
-                    and repo["rev"] == "master"
-                ):
-                    repo["rev"] = "main"
 
 
 def _get_env() -> TaskEnv:
@@ -1309,6 +967,7 @@ def _get_env() -> TaskEnv:
         has_config,
         config.arguments.on_stabilization_branches or len(stabilization_branches) > 0,
         config.arguments.on_stabilization_branches and len(stabilization_branches) > 0,
+        stabilization_branches,
         gopass,
         token,
         config,
@@ -1369,16 +1028,11 @@ def _do() -> None:
                 # config.setdefault("checks", {})["codespell"] = False
                 if task_env.c2cciutils_version.major == 1 and task_env.c2cciutils_version.minor <= 3:
                     config.setdefault("checks", {})["required_workflows"] = False
-
-        for name, task in (("update-pre-commit-config", _update_pre_commit_config_stabilization_branches),):
-            if task_env.config.enabled(name, True):
-                task(task_env)
     else:
         for name, task in (
-            ("upgrade-ubuntu", _upgrade_ubuntu),
+            # ("upgrade-ubuntu", _upgrade_ubuntu),
             ("update-audit-workflow", _update_audit_workflow),
             ("update-delete-old-workflow-run-workflow", _update_delete_old_workflows_run_workflow),
-            ("update-rebuild-workflow", _update_rebuild_workflow),
             ("update-pyproject-toml", _update_pyproject_toml),
             ("update-renovate-config", _update_renovate_config),
             ("update-config", _update_config),

@@ -2,6 +2,7 @@
 
 
 import os
+import subprocess
 
 import c2cciutils.security
 import multi_repo_automation as mra
@@ -21,8 +22,15 @@ from ruamel.yaml import YAML
 
 
 def _do() -> None:
-    if os.path.exists("poetry.lock"):
-        mra.run(["poetry", "install"], check=False)
+    assert False
+    if os.path.exists("pyproject.toml"):
+        work = False
+        try:
+            subprocess.run(["poetry", "--version"], check=True)
+            work = True
+        finally:
+            if not work:
+                mra.edit(["pyproject.toml"])
 
 
 #    mra.run([mra.get_browser(), f"https://github.com/{mra.get_repo_config()['name']}/settings/actions"])

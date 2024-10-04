@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 
+import os
+import subprocess
+
 import c2cciutils.security
 import multi_repo_automation as mra
 import requests
@@ -19,17 +22,21 @@ from ruamel.yaml import YAML
 
 
 def _do() -> None:
-    # mra.edit(['.git/config'])
+    if os.path.exists("pyproject.toml"):
+        try:
+            subprocess.run(["poetry", "--version"], check=True)
+        except Exception:
+            with mra.EditTOML("pyproject.toml") as pyproject:
+                poetry = pyproject.setdefault("tool", {}).setdefault("poetry", {})
+                poetry.setdefault("name", os.path.basename(os.getcwd()))
+                poetry.setdefault("version", "0.0.0")
+                poetry.setdefault("description", "TODO: Add a description")
+                # poetry.setdefault('authors', ["Stéphane Brunner <stephane.brunner@gmail.com>"])
+                poetry.setdefault("authors", ["Camptocamp <info@camptocamp.com>"])
 
-    with mra.EditConfig(".git/config", run_pre_commit=False) as git_config:
-        modified = True
-        while modified:
-            modified = False
-            for k in git_config.updater.keys():
-                if k.startswith("branch ") and k != 'branch "master"':
-                    print(str(k))
-                    del git_config[k]
-                    modified = True
+            # description = "AngularJS OpenLayers Library"
+            # description = "Demo of GeoMapFish Application"
+            mra.edit(["pyproject.toml"])
 
 
 if __name__ == "__main__":
@@ -40,5 +47,12 @@ if __name__ == "__main__":
         # pull_request_body
         # branch
         # pull_request_branch_prefix
-        config={},
+        # config={},
+        config={
+            "branch": "pyproject-config-fix",
+            "pull_request_branch_prefix": "pyproject-config-fix-",
+            "pull_request_title": "Add missing configuration in pyproject.toml",
+            "pull_request_body": "Needed to make `poetry --version` work, used in the audit.",
+        },
+        description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
     )
