@@ -13,7 +13,7 @@
     /** Do updates on pre-commit additional dependencies */
     {
       customType: 'regex',
-      fileMatch: ['^\\.versions\\.yaml$'],
+      fileMatch: ['^versions\\.yaml$'],
       matchStrings: ["'?(?<depName>[^':]+)'?: '?v?(?<currentValue>[0-9\\.]+)'? # (?<datasource>.+)"],
     },
   ],
