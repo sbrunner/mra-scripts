@@ -9,6 +9,7 @@ import glob
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, AnyStr, NamedTuple, Optional, Union
 
 import c2cciutils.lib.docker
@@ -25,6 +26,10 @@ from packaging import version
 # if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
 # mra.edit("file")
 # input()
+
+_VERSIONS = {}
+with open(Path(__file__).parent / "versions.yaml", encoding="utf-8") as f:
+    versions = py_yaml.load(f, Loader=py_yaml.SafeLoader)
 
 
 class Config:
@@ -265,7 +270,7 @@ def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
                 {
                     "uses": "actions/setup-python@v5",
                     "with": {
-                        "python-version": "3.11",
+                        "python-version": _VERSIONS["python"],
                     },
                 },
             )
@@ -735,12 +740,18 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
     with mra.EditRenovateConfigV2() as renovate_config:
         renovate_config["extends"] = [
-            "github>camptocamp/gs-renovate-config-preset:base.json5#0.3.3",
-            "github>camptocamp/gs-renovate-config-preset:ci.json5#0.3.3",
-            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#0.3.3",
-            "github>camptocamp/gs-renovate-config-preset:python.json5#0.3.3",
-            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#0.3.3",
-            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#0.3.3",
+            "github>camptocamp/gs-renovate-config-preset:base.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:ci.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:python.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
         ]
 
         for property in (
@@ -844,7 +855,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
             if "ci" in pre_commit_config:
                 del pre_commit_config["ci"]
 
-            pre_commit_config.add_repo("https://github.com/renovatebot/pre-commit-hooks", "37.428.1")
+            pre_commit_config.add_repo(
+                "https://github.com/renovatebot/pre-commit-hooks", _VERSIONS["renovatebot/pre-commit-hooks"]
+            )
             pre_commit_config.add_hook(
                 "https://github.com/renovatebot/pre-commit-hooks",
                 {
@@ -870,7 +883,10 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                 ]
 
             if schemas:
-                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "v2.2.0")
+                pre_commit_config.add_repo(
+                    "https://github.com/mheap/json-schema-spell-checker",
+                    _VERSIONS["mheap/json-schema-spell-checker"],
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/mheap/json-schema-spell-checker",
                     {
