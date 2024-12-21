@@ -1,0 +1,4 @@
+python: '3.11' # python
+camptocamp/gs-renovate-config-preset: '0.3.3' # git-tag
+renovatebot/pre-commit-hooks: '37.428.1' # git-tag
+mheap/json-schema-spell-checker: 'v2.2.0' # git-tag
