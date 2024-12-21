@@ -14,7 +14,7 @@
     {
       customType: 'regex',
       fileMatch: ['^\\.versions\\.yaml$'],
-      matchStrings: [" +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"],
+      matchStrings: ["'?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"],
     },
   ],
 }
