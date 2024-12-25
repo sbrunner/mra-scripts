@@ -25,6 +25,10 @@ from packaging import version
 # mra.edit("file")
 # input()
 
+_VERSIONS = {}
+with open(Path(__file__).parent / "versions.yaml", encoding="utf-8") as f:
+    versions = py_yaml.load(f, Loader=py_yaml.SafeLoader)
+
 
 class Config:
     _values: dict[str, Any] = {}
@@ -263,7 +267,7 @@ def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
                 {
                     "uses": "actions/setup-python@v5",
                     "with": {
-                        "python-version": "3.11",
+                        "python-version": _VERSIONS["python"],
                     },
                 },
             )
@@ -805,6 +809,10 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
 
 
 def _update_renovate_config(task_env: TaskEnv) -> None:
+    if not os.path.exists(".github/renovate.json5"):
+        with mra.Edit(".github/renovate.json5") as renovate_config:
+            renovate_config.data = "{}"
+
     upgrade_required = False
     with mra.EditRenovateConfigV2() as renovate_config:
         if "regexManagers" in renovate_config:
@@ -817,11 +825,6 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             for custom_manager in renovate_config["customManagers"]:
                 custom_manager["customType"] = "regex"
 
-    if task_env.c2cciutils_version >= version.parse("1.6.0"):
-        if not os.path.exists(".github/renovate.json5"):
-            with mra.Edit(".github/renovate.json5") as renovate_config:
-                renovate_config.data = "{}"
-
     with mra.EditRenovateConfigV2() as renovate_config:
         # matchPackagePrefixes => matchPackageNames
         for package_rule in renovate_config["packageRules"]:
@@ -831,69 +834,73 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePrefixes"]
 
-        renovate_config.setdefault(
-            "extends",
-            [
-                ":dependencyDashboard",
-                "group:monorepos",
-                "group:recommended",
-                "replacements:all",
-                "workarounds:all",
-            ],
+        renovate_config["extends"] = [
+            "github>camptocamp/gs-renovate-config-preset:base.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:ci.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:python.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+        ]
+
+        for property in (
+            "timezone",
+            "schedule",
+            "labels",
+            "separateMajorMinor",
+            "separateMinorPatch",
+            "prHourlyLimit",
+            "prConcurrentLimit",
+            "lockFileMaintenance",
+        ):
+            if property in renovate_config:
+                del renovate_config[property]
+        if "html" in renovate_config and (
+            renovate_config["html"] == {"fileMatch": ["\\.html?$", "\\.html?.mako$"]}
+            or renovate_config["html"] == {"fileMatch": ["\\.html?$"]}
+            or renovate_config["html"] == {"fileMatch": ["\\.html?.mako$"]}
+        ):
+            del renovate_config["html"]
+
+        renovate_config.remove_package_rule({}, ["Group and auto merge the patch updates"])
+        renovate_config.remove_package_rule({}, ["Group and auto merge the minor updates"])
+
+        # CI
+        renovate_config.remove_package_rule({}, ["Group the dev dependency update"])
+        renovate_config.remove_package_rule({}, ["Group and auto merge the CI dependencies"])
+
+        # pre-commit
+        if "pre-commit" in renovate_config:
+            del renovate_config["pre-commit"]
+        renovate_config.remove_regex_manager({}, ["Do updates on pre-commit additional dependencies"])
+
+        # python
+        renovate_config.remove_package_rule({}, ["Ungroup Python dependencies"])
+        renovate_config.remove_regex_manager({}, ["Python version in actions/setup-python action"])
+        renovate_config.remove_package_rule(
+            {}, ["In file `.python-version`, use the `<major>.<minor>` version"]
+        )
+
+        # json-schema
+        renovate_config.remove_regex_manager({}, ["Do update on the schema present in the YAML files"])
+
+        # shellcheck
+        renovate_config.remove_package_rule(
+            {}, ["Support the 4 parts of shellcheck-py version with a v prefix"]
         )
 
         renovate_config.remove_package_rule({}, ["Update dpkg versions at any time"])
-        if task_env.has_stabilization_branches:
-            if task_env.stabilization_branches == ["master"]:
-                renovate_config.add_package_rule(
-                    {
-                        "minimumReleaseAge": "7 days",
-                    },
-                    ["For security reason don't takes the too early packages"],
-                )
-            else:
-                renovate_config.remove_package_rule(
-                    {},
-                    ["For security reason don't takes the too early packages on stabilization branches"],
-                )
-                print(task_env.config)
-                renovate_config.add_package_rule(
-                    {
-                        "matchBaseBranches": task_env.config.value(
-                            "matchStabilizationBranches",
-                            task_env.config.repo.get("match_stabilization_branches", [r"/^[0-9]+\.[0-9]+$/"]),
-                        ),
-                        "minimumReleaseAge": "7 days",
-                    },
-                    [
-                        "Packages published very recently are not pushed to stabilization branches for security reasons"
-                    ],
-                )
-
         if not task_env.has_stabilization_branches or task_env.stabilization_branches == ["master"]:
             if "baseBranches" in renovate_config:
                 del renovate_config["baseBranches"]
             renovate_config.remove_package_rule({}, ["Accept only the patch on stabilization branches"])
             renovate_config.remove_package_rule({}, ["Accept only the patch on the stabilization branches"])
-
-        # renovate_config.add_regex_manager(
-        #     {
-        #         "fileMatch": ["^\\.github/workflows/.*\\.yaml$"],
-        #         "matchStrings": [
-        #             " python-version: ['\"](?<currentValue>[0-9\\.]+)['\"]",
-        #         ],
-        #         "datasourceTemplate": "python-version",
-        #         "depNameTemplate": "python",
-        #     },
-        #     ["Python version in actions/setup-python action"],
-        # )
-        renovate_config.add_package_rule(
-            {
-                "matchDepNames": ["python"],
-                "groupName": "Python",
-            },
-            ["Ungroup Python dependencies"],
-        ),
 
         renovate_config.remove_package_rule({}, ["In file .python-version, use the <major>.<minor> version"])
         if os.path.exists(".python-version"):
@@ -927,7 +934,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
             if "ci" in pre_commit_config:
                 del pre_commit_config["ci"]
 
-            pre_commit_config.add_repo("https://github.com/renovatebot/pre-commit-hooks", "37.428.1")
+            pre_commit_config.add_repo(
+                "https://github.com/renovatebot/pre-commit-hooks", _VERSIONS["renovatebot/pre-commit-hooks"]
+            )
             pre_commit_config.add_hook(
                 "https://github.com/renovatebot/pre-commit-hooks",
                 {
@@ -953,7 +962,10 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                 ]
 
             if schemas:
-                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "v2.2.0")
+                pre_commit_config.add_repo(
+                    "https://github.com/mheap/json-schema-spell-checker",
+                    _VERSIONS["mheap/json-schema-spell-checker"],
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/mheap/json-schema-spell-checker",
                     {
