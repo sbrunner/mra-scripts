@@ -22,8 +22,16 @@ def _convert():
         return
 
     arguments = mra.get_arguments()
-    no_repo = arguments.no_repo.split(",") if arguments.no_repo else repo_config.get("no-repo", [])
-    no_hook = arguments.no_hook.split(",") if arguments.no_hook else repo_config.get("no-hook", [])
+    no_repo = (
+        arguments.no_repo.split(",")
+        if arguments.no_repo
+        else repo_config.get("no-repo", [])
+    )
+    no_hook = (
+        arguments.no_hook.split(",")
+        if arguments.no_hook
+        else repo_config.get("no-hook", [])
+    )
 
     mra.run(["pre-commit", "install", "--allow-missing-config"])
 
@@ -78,7 +86,9 @@ pre-commit install --allow-missing-config
                         .lstrip("v")
                     )
 
-                    requirements.data = requirements.data.rstrip() + f"\npre-commit=={version}\n"
+                    requirements.data = (
+                        requirements.data.rstrip() + f"\npre-commit=={version}\n"
+                    )
 
     if not os.path.exists(".pre-commit-config.yaml"):
         with open(".pre-commit-config.yaml", "w") as f:
@@ -95,11 +105,16 @@ repos: []
     with mra.Edit(".pre-commit-config.yaml") as config:
         # TODO add missing # pip and # npm
         config.data = config.data.replace(
-            "https://github.com/sbrunner/pre-commit-copyright", "https://github.com/sbrunner/hooks"
+            "https://github.com/sbrunner/pre-commit-copyright",
+            "https://github.com/sbrunner/hooks",
         )
         if os.path.exists(".github/renovate.json5"):
-            config.data = re.sub(r"^( +- [^\s]+==[^\s]+)$", r"\1 # pypi", config.data, flags=re.MULTILINE)
-            config.data = re.sub(r"^( +- [^\s]+@[^\s]+)$", r"\1 # npm", config.data, flags=re.MULTILINE)
+            config.data = re.sub(
+                r"^( +- [^\s]+==[^\s]+)$", r"\1 # pypi", config.data, flags=re.MULTILINE
+            )
+            config.data = re.sub(
+                r"^( +- [^\s]+@[^\s]+)$", r"\1 # npm", config.data, flags=re.MULTILINE
+            )
 
     import time
 
@@ -127,7 +142,8 @@ repos: []
         repos_hooks = {}
         for repo in pre_commit_config["repos"]:
             repos_hooks.setdefault(
-                repo["repo"], {"repo": repo, "hooks": {hook["id"]: hook for hook in repo["hooks"]}}
+                repo["repo"],
+                {"repo": repo, "hooks": {hook["id"]: hook for hook in repo["hooks"]}},
             )
 
         spell_options = {}
@@ -137,12 +153,17 @@ repos: []
         if isinstance(spell, dict):
             ignore_re = spell.get("ignore_re", [])
 
-        if "poetry.lock" in mra.all_filenames() and "^(.*/)?poetry\\.lock$" not in ignore_re:
+        if (
+            "poetry.lock" in mra.all_filenames()
+            and "^(.*/)?poetry\\.lock$" not in ignore_re
+        ):
             ignore_re.append(r"^(.*/)?poetry\.lock$")
 
         spell_options["exclude"] = pre_commit_config.create_files_regex(ignore_re)
 
-        if os.path.exists("spell-ignore-words.txt") and not os.path.exists(".spell-ignore-words.txt"):
+        if os.path.exists("spell-ignore-words.txt") and not os.path.exists(
+            ".spell-ignore-words.txt"
+        ):
             mra.run(["git", "mv", "spell-ignore-words.txt", ".spell-ignore-words.txt"])
         if os.path.exists(".spell-ignore-words.txt"):
             spell_options["args"] = ["--ignore-words=.spell-ignore-words.txt"]
@@ -154,7 +175,9 @@ repos: []
         black_options = {}
         black = ci_config.get("checks", {}).get("black")
         if black and "ignore_patterns_re" in black:
-            black_options["exclude"] = pre_commit_config.create_files_regex(black["ignore_patterns_re"])
+            black_options["exclude"] = pre_commit_config.create_files_regex(
+                black["ignore_patterns_re"]
+            )
 
         pre_commit_config.skip_ci("copyright")
 
@@ -185,7 +208,12 @@ repos: []
         add_hook({"id": "copyright"})
         if (
             "poetry.lock"
-            in mra.run(["git", "ls-files"], stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout
+            in mra.run(
+                ["git", "ls-files"],
+                stdout=subprocess.PIPE,
+                encoding="utf-8",
+                check=True,
+            ).stdout
         ):
             add_hook(
                 {
@@ -299,10 +327,18 @@ repos: []
                     if len(job["steps"]) > index + 1:
                         if job["steps"][index + 1].get("run", "") == "git diff":
                             job["steps"][index + 1]["run"] = "git diff && false"
-                        elif job["steps"][index + 1].get("run", "") != "git diff && false":
-                            job["steps"].insert(index + 1, {"run": "git diff && false", "if": "failure()"})
+                        elif (
+                            job["steps"][index + 1].get("run", "")
+                            != "git diff && false"
+                        ):
+                            job["steps"].insert(
+                                index + 1,
+                                {"run": "git diff && false", "if": "failure()"},
+                            )
                     else:
-                        job["steps"].append({"run": "git diff && false", "if": "failure()"})
+                        job["steps"].append(
+                            {"run": "git diff && false", "if": "failure()"}
+                        )
                 else:
                     index = -1
                     for nb, step in enumerate(job["steps"]):
@@ -310,7 +346,9 @@ repos: []
                             index = nb
                             break
                     if index != -1:
-                        job["steps"].insert(index, {"run": "git diff && false", "if": "failure()"})
+                        job["steps"].insert(
+                            index, {"run": "git diff && false", "if": "failure()"}
+                        )
                         job["steps"].insert(
                             index,
                             {"run": "pre-commit run --all-files"},
@@ -335,7 +373,9 @@ repos: []
 
 
 def add_arguments(args_parser):
-    args_parser = args_parser.add_argument_group("pre-commit", "Parameters related to the pre-commit.")
+    args_parser = args_parser.add_argument_group(
+        "pre-commit", "Parameters related to the pre-commit."
+    )
     args_parser.add_argument(
         "--no-repo",
         default="",
@@ -358,7 +398,8 @@ if __name__ == "__main__":
         _convert,
         config={
             "pull_request_title": "Add/update pre-commit hooks",
-            "pull_request_body": "This is done by the automated script named " + __file__,
+            "pull_request_body": "This is done by the automated script named "
+            + __file__,
             "branch": "pre-commit",
         },
         add_arguments=add_arguments,

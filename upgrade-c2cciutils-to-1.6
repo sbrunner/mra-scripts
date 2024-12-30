@@ -18,7 +18,9 @@ from packaging import version
 # input()
 
 
-def _folder_scalar_string(value: list[str]) -> ruamel.yaml.scalarstring.FoldedScalarString:
+def _folder_scalar_string(
+    value: list[str],
+) -> ruamel.yaml.scalarstring.FoldedScalarString:
     result = ruamel.yaml.scalarstring.FoldedScalarString(" ".join(value))
     result.fold_pos = []
     pos = -1
@@ -35,7 +37,11 @@ def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
         if key in workflow:
             new_data.append((key, workflow[key]))
 
-    new_data += [e for e in workflow.items() if e[0] not in ("name", "on", "permissions", "env", "jobs")]
+    new_data += [
+        e
+        for e in workflow.items()
+        if e[0] not in ("name", "on", "permissions", "env", "jobs")
+    ]
 
     if "jobs" in workflow:
         new_data.append(("jobs", workflow["jobs"]))
@@ -80,7 +86,9 @@ def _do() -> None:
             "--description=A pull request is welcome to fix this issue",
         )
 
-    is_helm = os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml")
+    is_helm = os.path.exists("Chart.yaml") or os.path.exists(
+        "test/helmchart/Chart.yaml"
+    )
 
     for workflow_file in mra.run(
         ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
@@ -92,7 +100,9 @@ def _do() -> None:
                         job["runs-on"] = "ubuntu-22.04"
 
     gopass = "no-gopass" not in repo.get("types", [])
-    token = "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
+    token = (
+        "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass else "${{ secrets.TOKEN }}"
+    )
     if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
             for job in yaml["jobs"].values():
@@ -103,7 +113,10 @@ def _do() -> None:
                         step.setdefault("with", {})["token"] = token
                         checkout_step = nb
                     if nb == checkout_step + 1:
-                        if not step.get("run", "").startswith("git config ") and not gopass:
+                        if (
+                            not step.get("run", "").startswith("git config ")
+                            and not gopass
+                        ):
                             missing_git_config = True
                     if "c2cciutils-audit" in step.get("run", ""):
                         if "debug" in step["name"]:
@@ -181,7 +194,9 @@ def _do() -> None:
                     del yaml["on"]["workflow_dispatch"]
                 yaml["on"]["repository_dispatch"] = {"types": ["changelog"]}
             else:
-                yaml["on"]["push"] = {"tags": mra_yaml.commented_sec([["*.*.*", "\n\n"]])}
+                yaml["on"]["push"] = {
+                    "tags": mra_yaml.commented_sec([["*.*.*", "\n\n"]])
+                }
 
             create_release_step = (
                 [
@@ -226,7 +241,9 @@ def _do() -> None:
                     "with": {
                         "path": ".cache",
                         "key": "automation-${{ steps.get-date.outputs.date }}",
-                        "restore-keys": ruamel.yaml.scalarstring.LiteralScalarString("automation-\n\n"),
+                        "restore-keys": ruamel.yaml.scalarstring.LiteralScalarString(
+                            "automation-\n\n"
+                        ),
                     },
                 },
                 {
@@ -280,7 +297,9 @@ def _do() -> None:
         with mra.EditYAML(".github/workflows/delete-old-workflow-run.yaml") as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
-                    if step.get("uses", "").startswith("MajorScruffy/delete-old-workflow-runs"):
+                    if step.get("uses", "").startswith(
+                        "MajorScruffy/delete-old-workflow-runs"
+                    ):
                         step["name"] = "Delete old workflow runs"
                         step.setdefault("env", {})["GITHUB_TOKEN"] = token
 
@@ -307,9 +326,13 @@ def _do() -> None:
             for job in yaml["jobs"].values():
                 job["if"] = "github.event.pull_request.user.login == 'renovate[bot]'"
                 for step in job["steps"]:
-                    if step.get("uses", "").startswith("golfzaptw/action-auto-reviews-from-branches"):
+                    if step.get("uses", "").startswith(
+                        "golfzaptw/action-auto-reviews-from-branches"
+                    ):
                         step["name"] = "Auto reviews updates"
-                        step.setdefault("with", {}).update({"GITHUB_TOKEN": token, "AUTHOR": "renovate[bot]"})
+                        step.setdefault("with", {}).update(
+                            {"GITHUB_TOKEN": token, "AUTHOR": "renovate[bot]"}
+                        )
 
     if os.path.exists(".github/workflows/pr-checks.yaml"):
         with mra.EditYAML(".github/workflows/pr-checks.yaml") as yaml:
@@ -352,7 +375,10 @@ def _do() -> None:
                     if "c2cciutils-publish" in step.get("run", ""):
                         if not gopass:
                             step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                                {
+                                    "GITHUB_TOKEN": token,
+                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                }
                             )
 
     if os.path.exists(".github/workflows/main.yaml"):
@@ -366,7 +392,9 @@ def _do() -> None:
                     env.ca.items["HAS_SECRETS"] = [
                         None,
                         None,
-                        ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
+                        ruamel.yaml.CommentToken(
+                            "\n\n", ruamel.yaml.error.CommentMark(0), None
+                        ),
                         None,
                     ]
 
@@ -383,14 +411,18 @@ def _do() -> None:
                             value = None
                             if "env" in step:
                                 if step["env"].ca.items:
-                                    value = list(step["env"].ca.items.values())[-1][2].value
+                                    value = list(step["env"].ca.items.values())[-1][
+                                        2
+                                    ].value
                                 del step["env"]
                             job["steps"].ca.items[index] = [
                                 None,
                                 None,
                                 [
                                     ruamel.yaml.CommentToken(
-                                        value or "\n\n", ruamel.yaml.error.CommentMark(0), None
+                                        value or "\n\n",
+                                        ruamel.yaml.error.CommentMark(0),
+                                        None,
                                     )
                                 ],
                                 None,
@@ -416,7 +448,10 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                         publish_index = index
                         if not gopass:
                             step.setdefault("env", {}).update(
-                                {"GITHUB_TOKEN": token, "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}"}
+                                {
+                                    "GITHUB_TOKEN": token,
+                                    "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
+                                }
                             )
 
                 if (
@@ -427,7 +462,10 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                     and publish_index >= 0
                 ):
                     with mra.EditTOML("pyproject.toml") as pyproject:
-                        is_python = "project" in pyproject.data or "build-system" in pyproject.data
+                        is_python = (
+                            "project" in pyproject.data
+                            or "build-system" in pyproject.data
+                        )
 
                     if is_python:
                         job["steps"] = (
@@ -549,7 +587,9 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                         renovate_config.data,
                     )
                 with mra.EditRenovateConfig() as renovate_config:
-                    renovate_config.add("'pre-commit': { enabled: true },", "'pre-commit'")
+                    renovate_config.add(
+                        "'pre-commit': { enabled: true },", "'pre-commit'"
+                    )
                     renovate_config.add_regex_manager(
                         {
                             "fileMatch": [r"^.pre-commit-config\.yaml$"],
@@ -573,7 +613,9 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
 
     if os.path.exists(".pre-commit-config.yaml"):
         with mra.EditPreCommitConfig() as pre_commit_config:
-            pre_commit_config.add_repo("https://github.com/sbrunner/jsonschema-validator")
+            pre_commit_config.add_repo(
+                "https://github.com/sbrunner/jsonschema-validator"
+            )
             pre_commit_config.add_hook(
                 "https://github.com/sbrunner/jsonschema-validator",
                 {
@@ -604,7 +646,9 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
             )
 
     if is_helm:
-        with open(".github/run-changelog.mjs", "w", encoding="utf-8") as run_changelog_file:
+        with open(
+            ".github/run-changelog.mjs", "w", encoding="utf-8"
+        ) as run_changelog_file:
             run_changelog_file.write(
                 """import { Octokit } from '@octokit/action';
 
@@ -655,7 +699,11 @@ if (process.env.GITHUB_REF_TYPE == 'tag') {
                 )
                 steps.ca.items[len(steps) - 2] = [
                     None,
-                    [ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None)],
+                    [
+                        ruamel.yaml.CommentToken(
+                            "\n\n", ruamel.yaml.error.CommentMark(0), None
+                        )
+                    ],
                     None,
                     None,
                 ]
@@ -674,7 +722,8 @@ if __name__ == "__main__":
         config={
             "branch": "c2cciutils-upgrade",
             "pull_request_title": "Update to c2cciutils version 1.6 (CI updates)",
-            "pull_request_body": "This is done by the automated script named " + os.path.basename(__file__),
+            "pull_request_body": "This is done by the automated script named "
+            + os.path.basename(__file__),
         },
         description="Update the repository for c2cciutils version 1.6, the will also fix the errors he found",
     )
