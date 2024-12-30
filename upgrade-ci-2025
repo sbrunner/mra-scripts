@@ -1141,7 +1141,19 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePrefixes"]
 
-        extends = [e.value for e in renovate_config.get("extends", []) if not e.value.startswith("config:")]
+        extends = [e if isinstance(e, str) else e.value for e in renovate_config.get("extends", [])]
+        extends = [
+            e
+            for e in extends
+            if not e.startswith("config:")
+            and e
+            not in (
+                "group:monorepos",
+                "group:recommended",
+                "replacements:all",
+                "workarounds:all",
+            )
+        ]
         extends_base = [e.split("@")[0] for e in extends]
         for new_extend in (
             "github>camptocamp/gs-renovate-config-preset:base.json5#"
@@ -1328,7 +1340,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             break
 
                 pre_commit_config.add_repo(
-                    "https://github.com/astral-sh/ruff-pre-commit", _VERSIONS["astral-sh/ruff"]
+                    "https://github.com/astral-sh/ruff-pre-commit", _VERSIONS["astral-sh/ruff-pre-commit"]
                 )
                 pre_commit_config.add_hook(
                     "https://github.com/astral-sh/ruff-pre-commit", {"id": "ruff-format"}
