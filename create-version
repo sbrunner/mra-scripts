@@ -34,11 +34,17 @@ def _do() -> None:
                     [*security_md_lines[:index], new_line, *security_md_lines[index:]]
                 )
 
-    stabilization_branches_with_master = [repo.get("master_branch", "master"), *stabilization_branches]
+    stabilization_branches_with_master = [
+        repo.get("master_branch", "master"),
+        *stabilization_branches,
+    ]
 
     for labels in mra.gh_json("label", ["name"], "list"):
         if labels["name"].startswith("backport "):
-            if labels["name"].replace("backport ", "") not in stabilization_branches_with_master:
+            if (
+                labels["name"].replace("backport ", "")
+                not in stabilization_branches_with_master
+            ):
                 mra.gh(["label", "delete", labels["name"]])
 
     for branch in stabilization_branches_with_master:
@@ -62,15 +68,23 @@ def _do() -> None:
                     )
                 else:
                     renovate_config.add(
-                        f"baseBranches: {json.dumps(stabilization_branches_with_master)}", "baseBranches"
+                        f"baseBranches: {json.dumps(stabilization_branches_with_master)}",
+                        "baseBranches",
                     )
 
     if os.path.exists(".github/workflows/audit.yaml"):
         with mra.EditYAML(".github/workflows/audit.yaml") as yaml:
             for job in yaml["jobs"].values():
-                if "branch" in job.get("strategy", {}).get("matrix", {}) and stabilization_branches:
-                    yaml_stabilization_branches = ruamel.yaml.comments.CommentedSeq(stabilization_branches)
-                    yaml_stabilization_branches._yaml_comment = job["strategy"]["matrix"]["branch"].ca
+                if (
+                    "branch" in job.get("strategy", {}).get("matrix", {})
+                    and stabilization_branches
+                ):
+                    yaml_stabilization_branches = ruamel.yaml.comments.CommentedSeq(
+                        stabilization_branches
+                    )
+                    yaml_stabilization_branches._yaml_comment = job["strategy"][
+                        "matrix"
+                    ]["branch"].ca
                     job["strategy"]["matrix"]["branch"] = yaml_stabilization_branches
 
 
@@ -104,7 +118,8 @@ if __name__ == "__main__":
         config={
             "branch": "new-version",
             "pull_request_title": "Add a new stabilization version",
-            "pull_request_body": "This is done by the automated script named " + __file__,
+            "pull_request_body": "This is done by the automated script named "
+            + __file__,
         },
         add_arguments=add_arguments,
     )

@@ -27,19 +27,31 @@ def _do() -> None:
     ).stdout.split("\n"):
         if (
             pyproject_toml_file_name
-            and mra.run(["grep", "^prospector = ", pyproject_toml_file_name], exit_on_error=False).returncode
+            and mra.run(
+                ["grep", "^prospector = ", pyproject_toml_file_name],
+                exit_on_error=False,
+            ).returncode
             == 0
         ):
             if (
                 pyproject_toml_file_name
                 and mra.run(
-                    ["grep", "^prospector-profile-duplicated = ", pyproject_toml_file_name],
+                    [
+                        "grep",
+                        "^prospector-profile-duplicated = ",
+                        pyproject_toml_file_name,
+                    ],
                     exit_on_error=False,
                 ).returncode
                 != 0
             ):
                 mra.run(
-                    ["poetry", "add", "--group=dev", "prospector-profile-duplicated==0.1.0"],
+                    [
+                        "poetry",
+                        "add",
+                        "--group=dev",
+                        "prospector-profile-duplicated==0.1.0",
+                    ],
                     cwd=os.path.dirname(pyproject_toml_file_name)
                     if pyproject_toml_file_name != "pyproject.toml"
                     else None,
