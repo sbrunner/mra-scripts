@@ -575,7 +575,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
             if task_env.use_pypi:
                 permissions["id-token"] = "write"
 
-            for job in yaml["jobs"].values():
+            for job_name, job in yaml["jobs"].items():
                 pre_commit_index = -1
                 has_pre_commit_artifacts = False
                 publish_index = -1
@@ -750,15 +750,17 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                     else:
                         yaml["jobs"]["success"]["if"] = "always()"
 
-                    job["steps"].append(
-                        {
-                            "name": "Check if related check run failed",
-                            "uses": "actions/download-artifact@v4",
-                            "with": {
-                                "name": "Success",
-                            },
-                        }
-                    )
+                    step = {
+                        "name": "Check if related check run failed",
+                        "uses": "actions/download-artifact@v4",
+                        "with": {
+                            "name": "Success",
+                        },
+                    }
+                    if job_name == "publish":
+                        job["steps"].insert(0, step)
+                    else:
+                        job["steps"].append(step)
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
                 _canonicalize_workflow(yaml)
@@ -1313,6 +1315,9 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         # CI
         renovate_config.remove_package_rule({}, ["Group the dev dependency update"])
         renovate_config.remove_package_rule(
+            {}, ["Auto merge the dev dependency update"]
+        )
+        renovate_config.remove_package_rule(
             {}, ["Group and auto merge the CI dependencies"]
         )
 
@@ -1371,6 +1376,12 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 },
                 ["In file `.python-version`, use the `<major>.<minor>` version"],
             )
+
+        renovate_config.remove_package_rule({}, ["Group Poetry packages"])
+        if not renovate_config["packageRules"]:
+            del renovate_config["packageRules"]
+        if not renovate_config["customManagers"]:
+            del renovate_config["customManagers"]
 
 
 def _update_config(task_env: TaskEnv) -> None:
