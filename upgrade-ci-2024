@@ -1184,7 +1184,7 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
                     )
                     step.setdefault("env", {})[
                         "GITHUB_TOKEN"
-                    ] = "${{ secrets.GITHUB_TOKEN }}"
+                    ] = "${{ secrets.GITHUB_TOKEN }}"  # nosec
 
     if not add_tag_publish:
         return
