@@ -703,64 +703,64 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                         "${{ secrets.SNYK_TOKEN }}"
                                     )
 
-            if len(yaml["jobs"]) > 1:
-                candidate_jobs = set()
-                needed_jobs = set()
-                success_job = False
-                for name, job in yaml["jobs"].items():
-                    if name == "success":
-                        success_job = True
-                    if "needs" in job:
-                        candidate_jobs.add(name)
-                        if isinstance(job["needs"], list):
-                            needed_jobs += job["needs"]
-                        else:
-                            needed_jobs.add(job["needs"])
-                for needed_job in needed_jobs:
-                    if needed_job in candidate_jobs:
-                        candidate_jobs.remove(needed_job)
-                if len(candidate_jobs) == 1 and not success_job:
-                    candidate_job = list(candidate_jobs)[0]
-
-                    yaml["jobs"]["success"] = {
-                        "name": "Success",
-                        "runs-on": "ubuntu-22.04",
-                        "timeout-minutes": 5,
-                        "needs": yaml["jobs"][candidate_job]["needs"],
-                        "steps": [
-                            {
-                                "run": "touch SUCCESS",
-                            },
-                            {
-                                "uses": "actions/upload-artifact@v4",
-                                "with": {
-                                    "name": "Success",
-                                    "path": "SUCCESS",
-                                    "retention-days": 1,
-                                },
-                            },
-                        ],
-                    }
-
-                    yaml["jobs"][candidate_job]["needs"] = "success"
-                    if "if" in yaml["jobs"][candidate_job]:
-                        yaml["jobs"]["success"][
-                            "if"
-                        ] = f"always() && {yaml['jobs'][candidate_job]['if']}"
-                    else:
-                        yaml["jobs"]["success"]["if"] = "always()"
-
-                    step = {
-                        "name": "Check if related check run failed",
-                        "uses": "actions/download-artifact@v4",
-                        "with": {
-                            "name": "Success",
-                        },
-                    }
-                    if job_name == "publish":
-                        job["steps"].insert(0, step)
-                    else:
-                        job["steps"].append(step)
+            # if len(yaml["jobs"]) > 1:
+            #     candidate_jobs = set()
+            #     needed_jobs = set()
+            #     success_job = False
+            #     for name, job in yaml["jobs"].items():
+            #         if name == "success":
+            #             success_job = True
+            #         if "needs" in job:
+            #             candidate_jobs.add(name)
+            #             if isinstance(job["needs"], list):
+            #                 needed_jobs += job["needs"]
+            #             else:
+            #                 needed_jobs.add(job["needs"])
+            #     for needed_job in needed_jobs:
+            #         if needed_job in candidate_jobs:
+            #             candidate_jobs.remove(needed_job)
+            #     if len(candidate_jobs) == 1 and not success_job:
+            #         candidate_job = list(candidate_jobs)[0]
+            #
+            #         yaml["jobs"]["success"] = {
+            #             "name": "Success",
+            #             "runs-on": "ubuntu-22.04",
+            #             "timeout-minutes": 5,
+            #             "needs": yaml["jobs"][candidate_job]["needs"],
+            #             "steps": [
+            #                 {
+            #                     "run": "touch SUCCESS",
+            #                 },
+            #                 {
+            #                     "uses": "actions/upload-artifact@v4",
+            #                     "with": {
+            #                         "name": "Success",
+            #                         "path": "SUCCESS",
+            #                         "retention-days": 1,
+            #                     },
+            #                 },
+            #             ],
+            #         }
+            #
+            #         yaml["jobs"][candidate_job]["needs"] = "success"
+            #         if "if" in yaml["jobs"][candidate_job]:
+            #             yaml["jobs"]["success"][
+            #                 "if"
+            #             ] = f"always() && {yaml['jobs'][candidate_job]['if']}"
+            #         else:
+            #             yaml["jobs"]["success"]["if"] = "always()"
+            #
+            #         step = {
+            #             "name": "Check if related check run failed",
+            #             "uses": "actions/download-artifact@v4",
+            #             "with": {
+            #                 "name": "Success",
+            #             },
+            #         }
+            #         if job_name == "publish":
+            #             job["steps"].insert(0, step)
+            #         else:
+            #             job["steps"].append(step)
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
                 _canonicalize_workflow(yaml)
