@@ -427,8 +427,8 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             if step.get("run", "") == "c2cciutils-checks":
                                 if not task_env.gopass:
                                     env = step.setdefault("env", {})
-                                    env["SNYK_TOKEN"] = (
-                                        "${{ secrets.SNYK_TOKEN }}"  # nosec
+                                    env["SNYK_TOKEN"] = (  # nosec
+                                        "${{ secrets.SNYK_TOKEN }}"
                                     )
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
