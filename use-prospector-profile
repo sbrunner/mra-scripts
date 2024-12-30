@@ -52,9 +52,11 @@ def _do() -> None:
                         "--group=dev",
                         "prospector-profile-duplicated==0.1.0",
                     ],
-                    cwd=os.path.dirname(pyproject_toml_file_name)
-                    if pyproject_toml_file_name != "pyproject.toml"
-                    else None,
+                    cwd=(
+                        os.path.dirname(pyproject_toml_file_name)
+                        if pyproject_toml_file_name != "pyproject.toml"
+                        else None
+                    ),
                 )
 
     if os.path.exists(".pre-commit-config.yaml"):

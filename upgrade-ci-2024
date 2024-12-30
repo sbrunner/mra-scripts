@@ -427,9 +427,9 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             if step.get("run", "") == "c2cciutils-checks":
                                 if not task_env.gopass:
                                     env = step.setdefault("env", {})
-                                    env[
-                                        "SNYK_TOKEN"
-                                    ] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+                                    env["SNYK_TOKEN"] = (  # nosec
+                                        "${{ secrets.SNYK_TOKEN }}"
+                                    )
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
                 _canonicalize_workflow(yaml)
@@ -798,23 +798,23 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                         )
                         if "style" in poetry_dynamic_versioning:
                             del poetry_dynamic_versioning["style"]
-                        poetry_dynamic_versioning[
-                            "format-jinja"
-                        ] = tomlkit.items.String.from_raw(
-                            "\n".join(
-                                [
-                                    "",
-                                    '{%- if env.get("VERSION_TYPE") == "version_branch" -%}',
-                                    '{{serialize_pep440(bump_version(base, 1 if env.get("IS_MASTER") == "TRUE" else 2), dev=distance)}}',
-                                    "{%- elif distance == 0 -%}",
-                                    "{{serialize_pep440(base)}}",
-                                    "{%- else -%}",
-                                    "{{serialize_pep440(bump_version(base), dev=distance)}}",
-                                    "{%- endif -%}",
-                                    "",
-                                ]
-                            ),
-                            tomlkit.items.StringType.MLB,
+                        poetry_dynamic_versioning["format-jinja"] = (
+                            tomlkit.items.String.from_raw(
+                                "\n".join(
+                                    [
+                                        "",
+                                        '{%- if env.get("VERSION_TYPE") == "version_branch" -%}',
+                                        '{{serialize_pep440(bump_version(base, 1 if env.get("IS_MASTER") == "TRUE" else 2), dev=distance)}}',
+                                        "{%- elif distance == 0 -%}",
+                                        "{{serialize_pep440(base)}}",
+                                        "{%- else -%}",
+                                        "{{serialize_pep440(bump_version(base), dev=distance)}}",
+                                        "{%- endif -%}",
+                                        "",
+                                    ]
+                                ),
+                                tomlkit.items.StringType.MLB,
+                            )
                         )
                         poetry_plugin_tweak_dependencies_version = pyproject.setdefault(
                             "tool", {}
