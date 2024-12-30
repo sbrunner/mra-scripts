@@ -20,6 +20,7 @@ import glob
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, AnyStr, NamedTuple, Optional, Union
 
 import c2cciutils
@@ -39,7 +40,7 @@ from packaging import version
 
 _VERSIONS = {}
 with open(Path(__file__).parent / "versions.yaml", encoding="utf-8") as f:
-    versions = py_yaml.load(f, Loader=py_yaml.SafeLoader)
+    _VERSIONS = py_yaml.load(f, Loader=py_yaml.SafeLoader)
 
 
 class Config:

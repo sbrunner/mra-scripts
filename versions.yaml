@@ -8,7 +8,7 @@ prospector-profile-duplicated: 1.9.0 # pypi
 prospector-profile-utils: 1.14.1 # pypi
 ruff: 0.7.3 # pypi
 sbrunner/python-versions-hook: 0.8.0 # github-tags
-tag-publish: 0.13.0 # github-tags
+tag-publish: 0.13.0 # pypi
 sbrunner/jsonschema-gentypes: 1.8.1 # github-tags
 poetry-dynamic-versioning: 1.1.0 # pypi
 poetry-plugin-tweak-dependencies-version: 1.5.2 # pypi
