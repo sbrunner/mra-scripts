@@ -75,3 +75,8 @@ jobs:
 
       - run: poetry install
       - run: poetry run prospector --output-format=pylint
+
+      # To make the workflow fail if the pre-commit hook failed
+      - uses: actions/download-artifact@v4
+        with:
+          name: PRE_COMMIT_SUCCESS
