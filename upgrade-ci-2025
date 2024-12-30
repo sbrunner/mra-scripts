@@ -37,6 +37,10 @@ from packaging import version
 # mra.edit("file")
 # input()
 
+_VERSIONS = {}
+with open(Path(__file__).parent / "versions.yaml", encoding="utf-8") as f:
+    versions = py_yaml.load(f, Loader=py_yaml.SafeLoader)
+
 
 class Config:
     _values: dict[str, Any] = {}
@@ -432,12 +436,12 @@ def _set_schema_config(task_env: TaskEnv) -> None:
         ),
         (
             ".github/publish.yaml",
-            "https://raw.githubusercontent.com/camptocamp/tag-publish/0.13.3/tag_publish/schema.json",
+            f"https://raw.githubusercontent.com/camptocamp/tag-publish/{_VERSIONS['tag-publish']}/tag_publish/schema.json",
         ),
         (".github/ghci.yaml", "https://geoservices-int.camptocamp.com/github/schema.json"),
         (
             "jsonschema-gentypes.yaml",
-            "https://raw.githubusercontent.com/sbrunner/jsonschema-gentypes/1.8.1/jsonschema_gentypes/schema.json",
+            f"https://raw.githubusercontent.com/sbrunner/jsonschema-gentypes/{_VERSIONS['sbrunner/jsonschema-gentypes']}/jsonschema_gentypes/schema.json",
         ),
     ):
         if os.path.exists(config_filename):
@@ -494,7 +498,7 @@ def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
                 {
                     "uses": "actions/setup-python@v5",
                     "with": {
-                        "python-version": "3.11",
+                        "python-version": _VERSIONS["python"],
                     },
                 },
             )
@@ -977,10 +981,10 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                                     if "poetry" in requirements_txt.data:
                                         break
                         # for dependency, plugin, plugin_version in (
-                        #     (True, "poetry-dynamic-versioning", "1.1.0"),
-                        #     (True, "poetry-plugin-tweak-dependencies-version", "1.5.2"),
-                        #     (True, "poetry-plugin-drop-python-upper-constraint", "0.1.0"),
-                        #     (False, "poetry-plugin-export", "1.6.0"),
+                        #     (True, "poetry-dynamic-versioning", _VERSIONS["poetry-dynamic-versioning"]),
+                        #     (True, "poetry-plugin-tweak-dependencies-version", _VERSIONS["poetry-plugin-tweak-dependencies-version"]),
+                        #     (True, "poetry-plugin-drop-python-upper-constraint", _VERSIONS["poetry-plugin-drop-python-upper-constraint"]),
+                        #     (False, "poetry-plugin-export", _VERSIONS["poetry-plugin-export"]),
                         # ):
                         #     requirement = not dependency
                         #     if dependency and plugin not in build_system_requires_no_version:
@@ -1108,6 +1112,8 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
 
 
 def _update_renovate_config(task_env: TaskEnv) -> None:
+    if not os.path.exists(".github/renovate.json5"):
+        return
     upgrade_required = False
     with mra.EditRenovateConfigV2() as renovate_config:
         if "regexManagers" in renovate_config:
@@ -1137,13 +1143,18 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         extends = [e.value for e in renovate_config.get("extends", []) if not e.value.startswith("config:")]
         extends_base = [e.split("@")[0] for e in extends]
         for new_extend in (
-            "github>camptocamp/gs-renovate-config-preset:base.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:ci.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:python.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#0.5.0",
-            "github>camptocamp/gs-renovate-config-preset:preset.json5#0.5.0",
+            "github>camptocamp/gs-renovate-config-preset:base.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:ci.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:python.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
         ):
             if new_extend.split("@")[0] not in extends_base:
                 renovate_config["extends"].append(new_extend)
@@ -1245,7 +1256,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
             if "ci" in pre_commit_config:
                 del pre_commit_config["ci"]
 
-            pre_commit_config.add_repo("https://github.com/renovatebot/pre-commit-hooks", "39.49.0")
+            pre_commit_config.add_repo(
+                "https://github.com/renovatebot/pre-commit-hooks", _VERSIONS["renovatebot/pre-commit-hooks"]
+            )
             pre_commit_config.add_hook(
                 "https://github.com/renovatebot/pre-commit-hooks",
                 {
@@ -1271,7 +1284,10 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                 ]
 
             if schemas:
-                pre_commit_config.add_repo("https://github.com/mheap/json-schema-spell-checker", "v2.2.0")
+                pre_commit_config.add_repo(
+                    "https://github.com/mheap/json-schema-spell-checker",
+                    _VERSIONS["mheap/json-schema-spell-checker"],
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/mheap/json-schema-spell-checker",
                     {
@@ -1310,11 +1326,15 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             continue_ = True
                             break
 
-                pre_commit_config.add_repo("https://github.com/astral-sh/ruff-pre-commit", "v0.8.1")
+                pre_commit_config.add_repo(
+                    "https://github.com/astral-sh/ruff-pre-commit", _VERSIONS["astral-sh/ruff"]
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/astral-sh/ruff-pre-commit", {"id": "ruff-format"}
                 )
-                pre_commit_config.add_repo("https://github.com/PyCQA/prospector", "v1.13.0")
+                pre_commit_config.add_repo(
+                    "https://github.com/PyCQA/prospector", _VERSIONS["PyCQA/prospector"]
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/PyCQA/prospector",
                     {
@@ -1337,9 +1357,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         deps.split("=")[0] for deps in prospector_hook.get("additional_dependencies", [])
                     ]
                     for deps in [
-                        "prospector-profile-duplicated==1.9.0",
-                        "prospector-profile-utils==1.14.1",
-                        "ruff==0.7.3",
+                        "prospector-profile-duplicated==" + _VERSIONS["prospector-profile-duplicated"],
+                        "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
+                        "ruff==" + _VERSIONS["ruff"],
                     ]:
                         if deps.split("=")[0] not in current_deps:
                             pre_commit_config.add_commented_additional_dependencies(
@@ -1348,7 +1368,10 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     pre_commit_config.repos_hooks["https://github.com/PyCQA/prospector"]["hooks"][
                         "prospector"
                     ] = prospector_hook
-                pre_commit_config.add_repo("https://github.com/sbrunner/python-versions-hook", "0.8.0")
+                pre_commit_config.add_repo(
+                    "https://github.com/sbrunner/python-versions-hook",
+                    _VERSIONS["sbrunner/python-versions-hook"],
+                )
                 pre_commit_config.add_hook(
                     "https://github.com/sbrunner/python-versions-hook",
                     {
@@ -1397,7 +1420,7 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
             with mra.Edit(candidate_requirements_filename) as requirements_txt:
                 if "c2cciutils" in requirements_txt.data:
                     if "tag-publish" not in requirements_txt.data:
-                        requirements_txt.data += "tag-publish==0.13.3\n"
+                        requirements_txt.data += f"tag-publish=={_VERSIONS['tag-publish']}\n"
                     break
 
 
