@@ -660,7 +660,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     "uses": "actions/upload-artifact@v4",
                                     "with": {
                                         "name": f"{artifact_name}.patch",
-                                        "path": f"/tmp/{filename}.patch",
+                                        "path": f"/tmp/{filename}.patch",  # nosec
                                         "retention-days": 1,
                                     },
                                     "if": "failure()",
@@ -1675,8 +1675,8 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
                     step["run"] = step["run"].replace(
                         "c2cciutils-publish", "tag-publish"
                     )
-                    step.setdefault("env", {})["GITHUB_TOKEN"] = (
-                        "${{ secrets.GITHUB_TOKEN }}"  # nosec
+                    step.setdefault("env", {})["GITHUB_TOKEN"] = (  # nosec
+                        "${{ secrets.GITHUB_TOKEN }}"
                     )
 
     if not add_tag_publish:

@@ -381,7 +381,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     "uses": "actions/upload-artifact@v4",
                                     "with": {
                                         "name": f"{artifact_name}.patch",
-                                        "path": f"/tmp/{filename}.patch",
+                                        "path": f"/tmp/{filename}.patch",  # nosec
                                         "retention-days": 1,
                                     },
                                     "if": "failure()",

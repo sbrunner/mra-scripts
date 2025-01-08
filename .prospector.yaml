@@ -4,9 +4,15 @@ inherits:
   - utils:fix
   - utils:no-design-checks
   - utils:unsafe
+
+bandit:
+  disable:
+    - B404 # Consider possible security implications associated with the subprocess module.
+
 mypy:
   options:
     python-version: '3.9'
+
 ruff:
   options:
     target-version: py39
