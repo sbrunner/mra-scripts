@@ -518,6 +518,9 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
 
 
 def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
+    if task_env.on_stabilization_branches:
+        return
+
     # Update for Python 3.12
     # pip install match
     pip_install_re = re.compile(r"\bpip install\b")
@@ -1834,8 +1837,6 @@ def _do() -> None:
 
     for name, task in (
         ("create-labels", _create_labels),
-        ("tag-publish-config", _tag_publish_config),
-        ("set-schema-config", _set_schema_config),
         ("update-changelog-workflow", _update_changelog_workflow),
         ("update-clean-workflow", _update_clean_workflow),
         (
@@ -1844,7 +1845,6 @@ def _do() -> None:
         ),
         ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
         ("update-backport-workflow", _update_backport_workflow),
-        ("update-main-workflow", _update_main_workflow),
         ("update-ghci", _ghci_updates),
     ):
         if task_env.config.enabled(name, True):
@@ -1877,6 +1877,7 @@ def _do() -> None:
     else:
         for name, task in (
             # ("upgrade-ubuntu", _upgrade_ubuntu),
+            ("tag-publish-config", _tag_publish_config),
             ("update-audit-workflow", _update_audit_workflow),
             (
                 "update-delete-old-workflow-run-workflow",
@@ -1889,6 +1890,8 @@ def _do() -> None:
             ("update-config", _update_config),
             ("update-pre-commit-config", _update_pre_commit_config),
             ("remove-docker-compose-version", _remove_docker_compose_version),
+            ("set-schema-config", _set_schema_config),
+            ("update-main-workflow", _update_main_workflow),
             ("use-tag-publish", _use_tag_publish),
         ):
             if task_env.config.enabled(name, True):
