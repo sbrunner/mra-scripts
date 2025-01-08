@@ -9,8 +9,9 @@ prospector-profile-utils: 1.14.1 # pypi
 ruff: 0.7.3 # pypi
 sbrunner/python-versions-hook: 0.8.0 # github-tags
 tag-publish: 0.13.0 # pypi
-sbrunner/jsonschema-gentypes: 1.8.1 # github-tags
+sbrunner/jsonschema-gentypes: 2.9.3 # github-tags
 poetry-dynamic-versioning: 1.1.0 # pypi
 poetry-plugin-tweak-dependencies-version: 1.5.2 # pypi
 poetry-plugin-drop-python-upper-constraint: 0.1.0 # pypi
 poetry-plugin-export: 1.6.0 # pypi
+sbrunner/jsonschema-validator: 0.3.2 # github-tags
