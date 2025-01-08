@@ -4,8 +4,3 @@ inherits:
   - utils:fix
   - utils:no-design-checks
   - utils:unsafe
-
-bandit:
-  disable:
-    - B404 # Consider possible security implications associated with the subprocess module.
-    - B108 # Probable insecure usage of temp file/directory.
