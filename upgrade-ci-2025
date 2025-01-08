@@ -637,9 +637,9 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         if len(job["steps"]) > index + index_add + 1 and job["steps"][
                             index + index_add + 1
                         ].get("run", "").startswith("git diff"):
-                            job["steps"][index + index_add + 1][
-                                "run"
-                            ] = f"git diff --exit-code --patch > /tmp/{filename}.patch; git diff --color; git reset --hard || true"
+                            job["steps"][index + index_add + 1]["run"] = (
+                                f"git diff --exit-code --patch > /tmp/{filename}.patch; git diff --color; git reset --hard || true"
+                            )
                             job["steps"][index + index_add + 1]["if"] = "failure()"
                         else:
                             job["steps"].insert(
@@ -1672,9 +1672,9 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
                     step["run"] = step["run"].replace(
                         "c2cciutils-publish", "tag-publish"
                     )
-                    step.setdefault("env", {})[
-                        "GITHUB_TOKEN"
-                    ] = "${{ secrets.GITHUB_TOKEN }}"  # nosec
+                    step.setdefault("env", {})["GITHUB_TOKEN"] = (
+                        "${{ secrets.GITHUB_TOKEN }}"  # nosec
+                    )
 
     if not add_tag_publish:
         return
