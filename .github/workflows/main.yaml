@@ -8,6 +8,10 @@ on:
     tags:
       - '*'
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
   pre-commit:
     name: Pre-commit

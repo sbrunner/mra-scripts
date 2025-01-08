@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
 # TODO:
-# verify remove poetry-check in pre-commit
-# verify remove renovate check  https://github.com/python-jsonschema/check-jsonschema
-
 #    "Development Status :: 5 - Production/Stable",
 #    "Environment :: Console",
 #    "Operating System :: OS Independent",
@@ -12,9 +9,6 @@
 #    "License :: OSI Approved :: MIT License",
 #    "Typing :: Typed",
 
-# Add missing
-# dispatch:
-#   - {}
 
 import glob
 import os
@@ -381,11 +375,15 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
             del publish["helm"]["versions"]
         if "repository" in publish.get("docker", {}):
             del publish["docker"]["repository"]
+        if "print_versions" in publish:
+            del publish["print_versions"]
 
         if "pypi" in publish and not publish["pypi"].get("packages", []):
             del publish["pypi"]
         if "docker" in publish and not publish["docker"].get("images", []):
             del publish["docker"]
+        if "docker" in publish and "dispatch" in publish["docker"]:
+            del publish["docker"]["dispatch"]
         if "helm" in publish and not publish["helm"].get("packages", []):
             del publish["helm"]
 
@@ -520,6 +518,9 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
 
 
 def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
+    if task_env.on_stabilization_branches:
+        return
+
     # Update for Python 3.12
     # pip install match
     pip_install_re = re.compile(r"\bpip install\b")
@@ -639,9 +640,9 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         if len(job["steps"]) > index + index_add + 1 and job["steps"][
                             index + index_add + 1
                         ].get("run", "").startswith("git diff"):
-                            job["steps"][index + index_add + 1][
-                                "run"
-                            ] = f"git diff --exit-code --patch > /tmp/{filename}.patch; git diff --color; git reset --hard || true"
+                            job["steps"][index + index_add + 1]["run"] = (
+                                f"git diff --exit-code --patch > /tmp/{filename}.patch; git diff --color; git reset --hard || true"
+                            )
                             job["steps"][index + index_add + 1]["if"] = "failure()"
                         else:
                             job["steps"].insert(
@@ -659,7 +660,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                     "uses": "actions/upload-artifact@v4",
                                     "with": {
                                         "name": f"{artifact_name}.patch",
-                                        "path": f"/tmp/{filename}.patch",
+                                        "path": f"/tmp/{filename}.patch",  # nosec
                                         "retention-days": 1,
                                     },
                                     "if": "failure()",
@@ -1052,15 +1053,44 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                         )
                         if typed and "Typing :: Typed" not in classifiers:
                             classifiers.append("Typing :: Typed")
-                        # if task_env.min_python_version and task_env.max_python_version:
-                        #    min_python_version = _PythonVersion(task_env.min_python_version)
-                        #    max_python_version = _PythonVersion(task_env.max_python_version)
-                        #    classifiers = [c for c in classifiers if not c.startswith("Programming Language :: Python")]
-                        #    classifiers.append("Programming Language :: Python")
-                        #    classifiers.append("Programming Language :: Python :: 3")
-                        #    for minor in range(min_python_version.minor, max_python_version.minor + 1):
-                        #        classifiers.append(f"Programming Language :: Python :: {min_python_version.major}.{minor}")
                         pyproject["tool"]["poetry"]["classifiers"] = sorted(classifiers)
+
+                        if "dev-dependencies" in pyproject["tool"]["poetry"]:
+                            if "dependencies" in pyproject["tool"]["poetry"].setdefault(
+                                "group", {}
+                            ).setdefault("dev", {}):
+                                pyproject["tool"]["poetry"]["group"]["dev"][
+                                    "dependencies"
+                                ].update(
+                                    pyproject["tool"]["poetry"]["dev-dependencies"]
+                                )
+                            else:
+                                pyproject["tool"]["poetry"]["group"]["dev"][
+                                    "dependencies"
+                                ] = pyproject["tool"]["poetry"]["dev-dependencies"]
+                            del pyproject["tool"]["poetry"]["dev-dependencies"]
+
+                        if "prospector" in pyproject["tool"]["poetry"].get(
+                            "group", {}
+                        ).get("dev", {}).get("dependencies", {}):
+                            dev_dependencies = pyproject["tool"]["poetry"]["group"][
+                                "dev"
+                            ]["dependencies"]
+                            if "prospector-profile-utils" not in dev_dependencies:
+                                dev_dependencies["prospector-profile-utils"] = (
+                                    f"{_VERSIONS['prospector-profile-utils']}"
+                                )
+                            if "prospector-profile-duplicated" not in dev_dependencies:
+                                dev_dependencies["prospector-profile-duplicated"] = (
+                                    f"{_VERSIONS['prospector-profile-duplicated']}"
+                                )
+                            extra = dev_dependencies["prospector"].setdefault(
+                                "extras", []
+                            )
+                            if "with_ruff" not in extra:
+                                extra.append("with_ruff")
+                            if "with_pyroma" not in extra:
+                                extra.append("with_pyroma")
 
                         version_splitter = re.compile("[<>=]+")
                         [
@@ -1130,22 +1160,19 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                             "default", "present"
                         )
 
-                        pyproject.setdefault("tool", {}).setdefault(
-                            "ruff", {}
-                        ).setdefault("line-length", 110)
-                        pyproject.setdefault("tool", {}).setdefault(
-                            "ruff", {}
-                        ).setdefault("target-version", "py310")
-                        pyproject["tool"]["ruff"].setdefault("lint", {}).setdefault(
-                            "pydocstyle", {}
-                        ).setdefault("convention", "numpy")
-                        for rm_tool in ("mypy", "black", "isort"):
-                            if rm_tool in pyproject["tool"]:
-                                del pyproject["tool"][rm_tool]
+                    pyproject.setdefault("tool", {}).setdefault("ruff", {})
+                    pyproject["tool"]["ruff"].setdefault("target-version", "py310")
+                    pyproject["tool"]["ruff"].setdefault("line-length", 110)
+                    pyproject["tool"]["ruff"].setdefault("lint", {}).setdefault(
+                        "pydocstyle", {}
+                    ).setdefault("convention", "numpy")
+                    for rm_tool in ("mypy", "black", "isort"):
+                        if rm_tool in pyproject["tool"]:
+                            del pyproject["tool"][rm_tool]
 
                     if pyproject.get("tool", {}).get(
                         "poetry-dynamic-versioning", {}
-                    ).get("format-jinja", {}).strip() == "\n".join(
+                    ).get("format-jinja", "").strip() == "\n".join(
                         [
                             '{%- if env.get("VERSION_TYPE") == "version_branch" -%}',
                             '{{serialize_pep440(bump_version(base, 1 if env.get("IS_MASTER") == "TRUE" else 2), dev=distance)}}',
@@ -1181,14 +1208,17 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
 def _update_prospector_config(task_env: TaskEnv) -> None:
     if os.path.exists("..whitesource"):
         os.remove("..whitesource")
-    use_c2cwsiutils = (
-        mra.run(
-            ["git", "grep", "c2cwsgiutils"],
-            exit_on_error=False,
-            stdout=subprocess.DEVNULL,
-        ).returncode
-        == 0
+    use_c2cwsgiutils = False
+    proc = mra.run(
+        ["git", "grep", "c2cwsgiutils"],
+        exit_on_error=False,
+        stdout=subprocess.DEVNULL,
     )
+    for line in proc.stdout.split("\n") if proc.stdout is not None else []:
+        if ".py:" in line:
+            if "/test_" not in line and "_test.py" not in line:
+                use_c2cwsgiutils = True
+                break
     for bandit_filename in mra.run(
         ["git", "ls-files", ".bandit.yaml"], stdout=subprocess.PIPE
     ).stdout.splitlines():
@@ -1200,17 +1230,30 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
         with mra.EditYAML(prospector_filename) as prospector_config:
             if "bandit" in prospector_config:
                 del prospector_config["bandit"]
-            if "utils:base" in prospector_config.get("inherits", []):
-                for inherit in (
-                    "utils:fix",
-                    "utils:unsafe",
-                    *(["utils:c2cwsgiutils"] if use_c2cwsiutils else []),
-                ):
-                    if inherit not in prospector_config.get("inherits", []):
-                        prospector_config["inherits"].append(inherit)
+            for inherit in (
+                "utils:base",
+                "utils:fix",
+                "utils:unsafe",
+                *(["utils:c2cwsgiutils"] if use_c2cwsgiutils else []),
+            ):
+                if inherit not in prospector_config.get("inherits", []):
+                    prospector_config["inherits"].append(inherit)
 
-            # if task_env.min_python_version:
-            #    prospector_config.setdefault("mypy", {}).setdefault("options", {}).setdefault("python_version", task_env.min_python_version)
+            for tag in ("strictness", "max-line-length", "doc-warnings"):
+                if tag in prospector_config:
+                    del prospector_config[tag]
+            for tag in (
+                "pylint",
+                "pycodestyle",
+                "pydocstyle",
+                "bandit",
+                "mypy",
+                "mccabe",
+            ):
+                if "run" in prospector_config.get(tag, {}):
+                    del prospector_config[tag]["run"]
+                    if not prospector_config[tag]:
+                        del prospector_config[tag]
 
 
 # def _update_python_version(task_env: TaskEnv) -> None:
@@ -1244,7 +1287,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
     with mra.EditRenovateConfigV2() as renovate_config:
         # matchPackagePrefixes => matchPackageNames
-        for package_rule in renovate_config["packageRules"]:
+        for package_rule in renovate_config.get("packageRules", []):
             if "matchPackagePrefixes" in package_rule:
                 package_rule["matchPackageNames"] = [
                     f"/^{re.escape(prefix)}.*/"
@@ -1378,9 +1421,12 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             )
 
         renovate_config.remove_package_rule({}, ["Group Poetry packages"])
-        if not renovate_config["packageRules"]:
+        if "packageRules" in renovate_config and not renovate_config["packageRules"]:
             del renovate_config["packageRules"]
-        if not renovate_config["customManagers"]:
+        if (
+            "customManagers" in renovate_config
+            and not renovate_config["customManagers"]
+        ):
             del renovate_config["customManagers"]
 
 
@@ -1394,21 +1440,6 @@ def _update_config(task_env: TaskEnv) -> None:
             to_delete = len(config.keys()) == 0
         if to_delete:
             os.remove("ci/config.yaml")
-    if not os.path.exists("ci/config.yaml"):
-        with mra.EditPreCommitConfig() as pre_commit_config:
-            for index, repo in enumerate(list(pre_commit_config["repos"])):
-                print(repo["repo"])
-                if repo["repo"] == "https://github.com/sbrunner/jsonschema-validator":
-                    print(8888)
-                    if len(repo.get("hooks", [])) >= 1 and repo["hooks"][0].get(
-                        "files", ""
-                    ).strip() == "\n".join(["(?x)^(", r"    ci/config\.yaml", ")$"]):
-                        del pre_commit_config["repos"][index]
-
-    if task_env.use_docker:
-        if not os.path.exists("ci/dpkg-versions.yaml"):
-            with open("ci/dpkg-versions.yaml", "w", encoding="utf-8") as dpkg_versions:
-                dpkg_versions.write("{}")
 
 
 def _update_pre_commit_config(task_env: TaskEnv) -> None:
@@ -1417,16 +1448,73 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
             if "ci" in pre_commit_config:
                 del pre_commit_config["ci"]
 
+            if os.path.exists(".github/renovate.json5"):
+                pre_commit_config.add_repo(
+                    "https://github.com/renovatebot/pre-commit-hooks",
+                    _VERSIONS["renovatebot/pre-commit-hooks"],
+                )
+                pre_commit_config.add_hook(
+                    "https://github.com/renovatebot/pre-commit-hooks",
+                    {
+                        "id": "renovate-config-validator",
+                    },
+                )
+
             pre_commit_config.add_repo(
-                "https://github.com/renovatebot/pre-commit-hooks",
-                _VERSIONS["renovatebot/pre-commit-hooks"],
+                "https://github.com/sbrunner/jsonschema-validator",
+                _VERSIONS["sbrunner/jsonschema-validator"],
             )
             pre_commit_config.add_hook(
-                "https://github.com/renovatebot/pre-commit-hooks",
-                {
-                    "id": "renovate-config-validator",
-                },
+                "https://github.com/sbrunner/jsonschema-validator",
+                {"id": "jsonschema-validator"},
             )
+            for repo in pre_commit_config["repos"]:
+                if repo["repo"] == "https://github.com/sbrunner/jsonschema-validator":
+                    files = repo["hooks"][0].get("files", "").strip()
+                    if files.startswith(r"(?x)^("):
+                        files = files[len(r"(?x)^(") :]
+                    elif files.startswith(r"^"):
+                        files = files[len(r"^") :]
+                    if files.endswith(r")$"):
+                        files = files[: -len(r")$")]
+                    elif files.endswith(r"$"):
+                        files = files[: -len(r"$")]
+                    files_split = files.split("\n")
+                    files_split = [f.strip() for f in files_split]
+                    files_split = [f.lstrip("|") for f in files_split]
+                    files_split = [f for f in files_split if f]
+
+                    filenames = {
+                        ".github/publish.yaml",
+                        ".github/ghci.yaml",
+                        "jsonschema_gentype.yaml",
+                        "ci/config.yaml",
+                    }
+                    filenames_proc = mra.run(
+                        ["git", "grep", r"# yaml-language-server: \$schema=https://"],
+                        stdout=subprocess.PIPE,
+                        exit_on_error=False,
+                    )
+                    if filenames_proc.stdout is not None:
+                        for line in filenames_proc.stdout.split("\n"):
+                            if line:
+                                filename = line.split(":")[0]
+                                if filename.endswith(".yaml"):
+                                    filenames |= {filename}
+                    for filename in filenames:
+                        filename_re = re.escape(filename)
+                        if os.path.exists(filename):
+                            if filename_re not in files_split:
+                                files_split.append(filename_re)
+                        else:
+                            if filename_re in files_split:
+                                files_split.remove(filename_re)
+
+                    repo["hooks"][0]["files"] = pre_commit_config.create_files_regex(
+                        files_split
+                    )
+
+                    break
 
             # Do a spell check on the found schemas
             schemas = []
@@ -1478,6 +1566,11 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         if hook["id"] == "check-renovate":
                             del repo["hooks"][index]
                             break
+                if repo["repo"] == "https://github.com/sbrunner/hooks":
+                    for index, hook in enumerate(list(repo["hooks"])):
+                        if hook["id"] == "poetry-check":
+                            del repo["hooks"][index]
+                            break
 
             if task_env.use_python:
                 rm_repos = (
@@ -1485,6 +1578,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     "https://github.com/PyCQA/isort",
                     "https://github.com/PyCQA/autoflake",
                     "https://github.com/asottile/pyupgrade",
+                    "https://github.com/PyCQA/docformatter",
                 )
                 continue_ = True
                 while continue_:
@@ -1554,19 +1648,16 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "id": "python-versions",
                     },
                 )
-                sbrunner_repo_hooks = pre_commit_config.repos_hooks[
-                    "https://github.com/sbrunner/hooks"
-                ]["hooks"]
-                for name, hook in list(sbrunner_repo_hooks.items()):
-                    if hook["id"] == "poetry-check":
-                        del sbrunner_repo_hooks[name]
-
-                jsonschema_repo_hooks = pre_commit_config.repos_hooks[
-                    "https://github.com/python-jsonschema/check-jsonschema"
-                ]["hooks"]
-                for name, hook in list(jsonschema_repo_hooks.items()):
-                    if hook["id"] == "check-renovate":
-                        del jsonschema_repo_hooks[name]
+                pre_commit_config.add_repo(
+                    "https://github.com/sbrunner/python-versions-hook",
+                    _VERSIONS["sbrunner/python-versions-hook"],
+                )
+                pre_commit_config.add_hook(
+                    "https://github.com/sbrunner/python-versions-hook",
+                    {
+                        "id": "python-versions",
+                    },
+                )
 
 
 def _use_tag_publish(task_env: TaskEnv) -> None:
@@ -1584,9 +1675,9 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
                     step["run"] = step["run"].replace(
                         "c2cciutils-publish", "tag-publish"
                     )
-                    step.setdefault("env", {})[
-                        "GITHUB_TOKEN"
-                    ] = "${{ secrets.GITHUB_TOKEN }}"  # nosec
+                    step.setdefault("env", {})["GITHUB_TOKEN"] = (  # nosec
+                        "${{ secrets.GITHUB_TOKEN }}"
+                    )
 
     if not add_tag_publish:
         return
@@ -1746,8 +1837,6 @@ def _do() -> None:
 
     for name, task in (
         ("create-labels", _create_labels),
-        ("tag-publish-config", _tag_publish_config),
-        ("set-schema-config", _set_schema_config),
         ("update-changelog-workflow", _update_changelog_workflow),
         ("update-clean-workflow", _update_clean_workflow),
         (
@@ -1756,7 +1845,6 @@ def _do() -> None:
         ),
         ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
         ("update-backport-workflow", _update_backport_workflow),
-        ("update-main-workflow", _update_main_workflow),
         ("update-ghci", _ghci_updates),
     ):
         if task_env.config.enabled(name, True):
@@ -1789,6 +1877,7 @@ def _do() -> None:
     else:
         for name, task in (
             # ("upgrade-ubuntu", _upgrade_ubuntu),
+            ("tag-publish-config", _tag_publish_config),
             ("update-audit-workflow", _update_audit_workflow),
             (
                 "update-delete-old-workflow-run-workflow",
@@ -1801,6 +1890,8 @@ def _do() -> None:
             ("update-config", _update_config),
             ("update-pre-commit-config", _update_pre_commit_config),
             ("remove-docker-compose-version", _remove_docker_compose_version),
+            ("set-schema-config", _set_schema_config),
+            ("update-main-workflow", _update_main_workflow),
             ("use-tag-publish", _use_tag_publish),
         ):
             if task_env.config.enabled(name, True):

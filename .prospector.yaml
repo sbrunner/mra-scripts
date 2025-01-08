@@ -8,4 +8,11 @@ inherits:
 bandit:
   disable:
     - B404 # Consider possible security implications associated with the subprocess module.
-    - B108 # Probable insecure usage of temp file/directory.
+
+mypy:
+  options:
+    python-version: '3.9'
+
+ruff:
+  options:
+    target-version: py39

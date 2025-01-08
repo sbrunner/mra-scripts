@@ -9,12 +9,4 @@
     'github>camptocamp/gs-renovate-config-preset:json-schema.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:shellcheck.json5#0.3.3',
   ],
-  customManagers: [
-    /** Do updates on pre-commit additional dependencies */
-    {
-      customType: 'regex',
-      fileMatch: ['^versions\\.yaml$'],
-      matchStrings: ["'?(?<depName>[^':]+)'?: '?v?(?<currentValue>[0-9\\.]+)'? # (?<datasource>.+)"],
-    },
-  ],
 }
