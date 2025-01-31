@@ -548,7 +548,7 @@ def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
             job["steps"].insert(
                 install_index,
                 {
-                    "uses": "actions/setup-python@v5",
+                    "uses": "actions/setup-python@" + _VERSIONS["actions/setup-python"],
                     "with": {
                         "python-version": _VERSIONS["python"],
                     },
@@ -603,6 +603,25 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                         == "Update dpkg versions list.patch"
                     ):
                         has_publish_artifacts = True
+                    if (
+                        step.get("uses", "").startswith("actions/checkout@")
+                        and step.get("restore-keys", "")
+                        == "pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}"
+                    ):
+                        step["key"] = (
+                            "pre-commit-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}-${{ hashFiles('.pre-commit-config.yaml') }}"
+                        )
+                        step["restore-keys"] = (
+                            ruamel.yaml.scalarstring.LiteralScalarString(
+                                "\n".join(
+                                    [
+                                        "pre-commit-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}-${{ hashFiles('.pre-commit-config.yaml') }}",
+                                        "pre-commit-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}-",
+                                        "pre-commit-",
+                                    ]
+                                )
+                            )
+                        )
 
                 index_add = 0
                 for index, filename, has_artifact, artifact_name in (
@@ -772,23 +791,50 @@ def _update_audit_workflow(task_env: TaskEnv) -> None:
         os.remove(".github/workflows/audit.yaml")
 
 
-def _update_changelog_workflow(task_env: TaskEnv) -> None:
+def _update_clean_workflow(task_env: TaskEnv) -> None:
+    if os.path.exists(".github/workflows/clean.yaml"):
+        with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
+            _update_workflow_venv(task_env, yaml)
+
+
+def _clean_update_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists(".github/workflows/changelog.yaml"):
         os.remove(".github/workflows/changelog.yaml")
     if os.path.exists(".github/run-changelog.mjs"):
         os.remove(".github/run-changelog.mjs")
+    if os.path.exists(".github/workflows/pr-checks.yaml"):
+        os.remove(".github/workflows/pr-checks.yaml")
+    if os.path.exists(".github/workflows/test_url.yaml"):
+        os.remove(".github/workflows/test_url.yaml")
 
-
-def _update_clean_workflow(task_env: TaskEnv) -> None:
     if not task_env.use_docker:
         if os.path.exists(".github/workflows/clean.yaml"):
             os.remove(".github/workflows/clean.yaml")
         return
-    if os.path.exists(".github/workflows/clean.yaml"):
-        with mra.EditYAML(".github/workflows/clean.yaml") as yaml:
-            _update_workflow_venv(task_env, yaml)
+
+    if not task_env.has_stabilization_branches:
+        if os.path.exists(".github/workflows/backport.yaml"):
+            os.remove(".github/workflows/backport.yaml")
+        return
+
+    # Upgrade deprecated workflows
+    for workflow_filename in glob.glob(".github/workflows/*.yaml"):
+        with mra.EditYAML(workflow_filename) as yaml:
+            for job in yaml["jobs"].values():
+                for step in job["steps"]:
+                    if "uses" in step:
+                        print(step["uses"])
+                    for action, version in [
+                        ("actions/cache", "v1"),
+                        ("actions/cache", "v2"),
+                        ("actions/upload-artifact", "v3"),
+                        ("actions/download-artifact", "v3"),
+                    ]:
+                        if step.get("uses", "").startswith(f"{action}@{version}"):
+                            step["uses"] = f"{action}@{_VERSIONS[action]}"
+                            break
 
 
 def _update_delete_old_workflows_run_workflow(task_env: TaskEnv) -> None:
@@ -985,20 +1031,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
-
-
-def _update_pull_request_checks_workflow(task_env: TaskEnv) -> None:
-    if os.path.exists(".github/workflows/pr-checks.yaml"):
-        os.remove(".github/workflows/pr-checks.yaml")
-    if os.path.exists(".github/workflows/test_url.yaml"):
-        os.remove(".github/workflows/test_url.yaml")
-
-
-def _update_backport_workflow(task_env: TaskEnv) -> None:
-    if not task_env.has_stabilization_branches:
-        if os.path.exists(".github/workflows/backport.yaml"):
-            os.remove(".github/workflows/backport.yaml")
-        return
 
 
 class _PythonVersion:
@@ -1233,7 +1265,7 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
             for inherit in (
                 "utils:base",
                 "utils:fix",
-                "utils:unsafe",
+                # "utils:unsafe",
                 *(["utils:c2cwsgiutils"] if use_c2cwsgiutils else []),
             ):
                 if inherit not in prospector_config.get("inherits", []):
@@ -1606,23 +1638,24 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "id": "prospector",
                     },
                 )
-                prospector_hook = pre_commit_config.repos_hooks[
-                    "https://github.com/PyCQA/prospector"
-                ]["hooks"]["prospector"]
-                prospector_hook["args"] = [
-                    "--tool=ruff",
-                    "--die-on-tool-error",
-                    "--output-format=pylint",
-                ]
                 if (
                     "prospector"
                     in pre_commit_config.repos_hooks[
                         "https://github.com/PyCQA/prospector"
                     ]["hooks"]
                 ):
+                    prospector_hooks = pre_commit_config.repos_hooks[
+                        "https://github.com/PyCQA/prospector"
+                    ]["hooks"]["prospector"]
+                    prospector_hooks[0]["args"] = [
+                        "--tool=ruff",
+                        "--die-on-tool-error",
+                        "--output-format=pylint",
+                        "--profile=.prospector.yaml,utils:unsafe",
+                    ]
                     current_deps = [
                         deps.split("=")[0]
-                        for deps in prospector_hook.get("additional_dependencies", [])
+                        for deps in prospector_hooks.get("additional_dependencies", [])
                     ]
                     for deps in [
                         "prospector-profile-duplicated=="
@@ -1633,11 +1666,35 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     ]:
                         if deps.split("=")[0] not in current_deps:
                             pre_commit_config.add_commented_additional_dependencies(
-                                prospector_hook, [deps], "pypi"
+                                prospector_hooks, [deps], "pypi"
                             )
-                    pre_commit_config.repos_hooks[
-                        "https://github.com/PyCQA/prospector"
-                    ]["hooks"]["prospector"] = prospector_hook
+                    # if len(prospector_hooks) == 1:
+                    #    if not os.path.exist(".prospector-test.yaml"):
+                    #        with mra.EditYAML(".prospector-test.yaml") as prospector_test:
+                    #            prospector_test['inherits'] = [
+                    #                'duplicated',
+                    #                'utils:tests',
+                    #            ]
+                    #    pre_commit_config.add_hook(
+                    #        "https://github.com/PyCQA/prospector",
+                    #        {
+                    #            "id": "prospector",
+                    #            "args": [
+                    #                "--tool=ruff",
+                    #                "--die-on-tool-error",
+                    #                "--output-format=pylint",
+                    #                "--profile=.prospector-test.yaml,utils:unsafe",
+                    #            ],
+                    #            "additional_dependencies": [
+                    #                "prospector-profile-duplicated=="
+                    #                + _VERSIONS["prospector-profile-duplicated"],
+                    #                "prospector-profile-utils=="
+                    #                + _VERSIONS["prospector-profile-utils"],
+                    #                "ruff==" + _VERSIONS["ruff"],
+                    #            ],
+                    #        },
+                    #    )
+
                 pre_commit_config.add_repo(
                     "https://github.com/sbrunner/python-versions-hook",
                     _VERSIONS["sbrunner/python-versions-hook"],
@@ -1836,16 +1893,11 @@ def _do() -> None:
     print(f"Task environment: {task_env}")
 
     for name, task in (
-        ("create-labels", _create_labels),
-        ("update-changelog-workflow", _update_changelog_workflow),
-        ("update-clean-workflow", _update_clean_workflow),
+        ("clean-update-workflow", _clean_update_workflow),
         (
             "update-dependency-auto-review-workflow",
             _update_pull_request_automation_workflow,
         ),
-        ("update-pull-request-checks-workflow", _update_pull_request_checks_workflow),
-        ("update-backport-workflow", _update_backport_workflow),
-        ("update-ghci", _ghci_updates),
     ):
         if task_env.config.enabled(name, True):
             task(task_env)
@@ -1862,21 +1914,11 @@ def _do() -> None:
         for file_ in glob.glob(".github/workflows/rebuild*.yaml"):
             os.remove(file_)
 
-        if not os.path.exists("ci/config.yaml"):
-            with open("ci/config.yaml", "w", encoding="utf-8") as config:
-                config.write("{}")
-
-        with mra.EditYAML("ci/config.yaml") as config:
-            if config.get("checks") is not False:
-                # config.setdefault("checks", {})["codespell"] = False
-                if (
-                    task_env.c2cciutils_version.major == 1
-                    and task_env.c2cciutils_version.minor <= 3
-                ):
-                    config.setdefault("checks", {})["required_workflows"] = False
     else:
         for name, task in (
             # ("upgrade-ubuntu", _upgrade_ubuntu),
+            ("create-labels", _create_labels),
+            ("update-clean-workflow", _update_clean_workflow),
             ("tag-publish-config", _tag_publish_config),
             ("update-audit-workflow", _update_audit_workflow),
             (
@@ -1892,6 +1934,7 @@ def _do() -> None:
             ("remove-docker-compose-version", _remove_docker_compose_version),
             ("set-schema-config", _set_schema_config),
             ("update-main-workflow", _update_main_workflow),
+            ("update-ghci", _ghci_updates),
             ("use-tag-publish", _use_tag_publish),
         ):
             if task_env.config.enabled(name, True):
