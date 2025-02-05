@@ -676,7 +676,8 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             job["steps"].insert(
                                 index + index_add + 1,
                                 {
-                                    "uses": "actions/upload-artifact@v4",
+                                    "uses": "actions/upload-artifact@v"
+                                    + _VERSIONS["actions/upload-artifact"],
                                     "with": {
                                         "name": f"{artifact_name}.patch",
                                         "path": f"/tmp/{filename}.patch",  # nosec
