@@ -16,7 +16,7 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any, AnyStr, NamedTuple, Optional, Union
-
+import functools
 import c2cciutils
 import multi_repo_automation as mra
 import ruamel.yaml.comments
@@ -1362,6 +1362,14 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:group.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            *(
+                [
+                    f"github>camptocamp/gs-renovate-config-preset:stabilization-branches.json5#"
+                    + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+                ]
+                if task_env.has_stabilization_branches
+                else []
+            ),
             "github>camptocamp/gs-renovate-config-preset:preset.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:ci.json5#"
@@ -1381,6 +1389,23 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         ):
             if new_extend.split("#")[0] not in extends_base:
                 renovate_config["extends"].append(new_extend)
+
+        # put profile base at first, group at second, and stabilization-branches as thirst.
+        def cmp(extend1, extend2) -> int:
+            for preset in ["base", "group", "stabilization-branches"]:
+                if extend1.startswith(
+                    f"github>camptocamp/gs-renovate-config-preset:{preset}"
+                ):
+                    return -1
+                if extend2.startswith(
+                    f"github>camptocamp/gs-renovate-config-preset:{preset}"
+                ):
+                    return 1
+            return 0
+
+        renovate_config["extends"] = sorted(
+            renovate_config["extends"], key=functools.cmp_to_key(cmp)
+        )
 
         for property in (
             "timezone",
