@@ -799,6 +799,8 @@ def _update_clean_workflow(task_env: TaskEnv) -> None:
 
 
 def _clean_update_workflow(task_env: TaskEnv) -> None:
+    if os.path.exists(".whitesource"):
+        os.remove(".whitesource")
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists(".github/workflows/changelog.yaml"):
@@ -1239,8 +1241,6 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
 
 
 def _update_prospector_config(task_env: TaskEnv) -> None:
-    if os.path.exists("..whitesource"):
-        os.remove("..whitesource")
     use_c2cwsgiutils = False
     proc = mra.run(
         ["git", "grep", "c2cwsgiutils"],
@@ -1252,16 +1252,18 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
             if "/test_" not in line and "_test.py" not in line:
                 use_c2cwsgiutils = True
                 break
+    has_bandit_file = False
     for bandit_filename in mra.run(
         ["git", "ls-files", ".bandit.yaml"], stdout=subprocess.PIPE
     ).stdout.splitlines():
-        if os.path.exists(bandit_filename):
+        has_bandit_file = os.path.exists(bandit_filename)
+        if has_bandit_file:
             os.remove(bandit_filename)
     for prospector_filename in mra.run(
         ["git", "ls-files", ".prospector.yaml"], stdout=subprocess.PIPE
     ).stdout.splitlines():
         with mra.EditYAML(prospector_filename) as prospector_config:
-            if "bandit" in prospector_config:
+            if has_bandit_file and "bandit" in prospector_config:
                 del prospector_config["bandit"]
             for inherit in (
                 "utils:base",
@@ -1328,6 +1330,15 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePrefixes"]
 
+        for i, extend in enumerate(renovate_config["extends"]):
+            if extend.value.startswith(
+                "github>camptocamp/gs-renovate-config-preset:preset.json5#"
+            ):
+                extend.value = (
+                    "github>camptocamp/gs-renovate-config-preset:preset.json5#"
+                    + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+                )
+
         extends = [
             e if isinstance(e, str) else e.value
             for e in renovate_config.get("extends", [])
@@ -1344,9 +1355,12 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 "workarounds:all",
             )
         ]
-        extends_base = [e.split("@")[0] for e in extends]
+
+        extends_base = [e.split("#")[0] for e in extends]
         for new_extend in (
             "github>camptocamp/gs-renovate-config-preset:base.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:preset.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:ci.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
@@ -1363,7 +1377,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
         ):
-            if new_extend.split("@")[0] not in extends_base:
+            if new_extend.split("#")[0] not in extends_base:
                 renovate_config["extends"].append(new_extend)
 
         for property in (
@@ -1661,7 +1675,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     ]
                     current_deps = [
                         deps.split("=")[0]
-                        for deps in prospector_hooks.get("additional_dependencies", [])
+                        for deps in prospector_hooks[0].get(
+                            "additional_dependencies", []
+                        )
                     ]
                     for deps in [
                         "prospector-profile-duplicated=="
@@ -1691,6 +1707,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                     "ruff==" + _VERSIONS["ruff"],
                                 ],
                             },
+                            force=True,
                         )
 
                 pre_commit_config.add_repo(
