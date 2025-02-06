@@ -1,6 +1,6 @@
 python: '3.13' # python-version
 camptocamp/gs-renovate-config-preset: 0.6.0 # github-tags
-renovatebot/pre-commit-hooks: 37.440.7 # github-tags
+renovatebot/pre-commit-hooks: 39.162.0 # github-tags
 mheap/json-schema-spell-checker: v2.2.0 # github-tags
 astral-sh/ruff-pre-commit: v0.9.4 # github-tags
 PyCQA/prospector: v1.14.1 # github-tags
