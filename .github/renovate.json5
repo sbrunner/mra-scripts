@@ -23,6 +23,7 @@
       fileMatch: ['^versions\\.yaml$'],
       matchStrings: [
         "(?<depName>[^':]+): (?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
+        /*
         "'(?<depName>[^':]+)': (?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
         "(?<depName>[^':]+): '(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
         "'(?<depName>[^':]+)': '(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
@@ -30,6 +31,7 @@
         "'(?<depName>[^':]+)': v(?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
         "(?<depName>[^':]+): 'v(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
         "'(?<depName>[^':]+)': 'v(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
+        */
       ],
     },
   ],
