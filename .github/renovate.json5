@@ -1,21 +1,15 @@
 {
   extends: [
-    /*'github>camptocamp/gs-renovate-config-preset:base.json5#0.3.3',*/
-    'config:recommended',
+    'github>camptocamp/gs-renovate-config-preset:base.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:preset.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:ci.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:pre-commit.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:python.json5#0.3.3',
+    'github>camptocamp/gs-renovate-config-preset:security.json5#0.3.3',
+    'github>camptocamp/gs-renovate-config-preset:own.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:json-schema.json5#0.3.3',
     'github>camptocamp/gs-renovate-config-preset:shellcheck.json5#0.3.3',
   ],
-  timezone: 'Europe/Zurich',
-  schedule: ['after 5pm on the last day of the month', 'on the first day of the month'],
-  labels: ['dependencies'],
-  separateMajorMinor: true,
-  separateMinorPatch: true,
-  prHourlyLimit: 0,
-  prConcurrentLimit: 0,
   customManagers: [
     /** Update the versions */
     {
@@ -23,15 +17,6 @@
       fileMatch: ['^versions\\.yaml$'],
       matchStrings: [
         "'?(?<depName>[a-zA-Z0-9-_/]+)'?: '?(?<currentValue>[v0-9\\.]+)'? # (?<datasource>[a-z-]+)",
-        /*
-        "'(?<depName>[^':]+)': (?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
-        "(?<depName>[^':]+): '(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
-        "'(?<depName>[^':]+)': '(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
-        "(?<depName>[^':]+): v(?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
-        "'(?<depName>[^':]+)': v(?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
-        "(?<depName>[^':]+): 'v(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
-        "'(?<depName>[^':]+)': 'v(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
-        */
       ],
     },
   ],
