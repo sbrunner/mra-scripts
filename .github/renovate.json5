@@ -22,7 +22,7 @@
       customType: 'regex',
       fileMatch: ['^versions\\.yaml$'],
       matchStrings: [
-        "^(?<depName>[^':]+): (?<currentValue>v?[0-9\\.]+) # (?<datasource>.+)",
+        "^(?<depName>[^':]+): (?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
         /*
         "'(?<depName>[^':]+)': (?<currentValue>[0-9\\.]+) # (?<datasource>.+)",
         "(?<depName>[^':]+): '(?<currentValue>[0-9\\.]+)' # (?<datasource>.+)",
