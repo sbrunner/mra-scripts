@@ -1354,6 +1354,10 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:python.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:security.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:own.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:json-schema.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
@@ -1652,7 +1656,8 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "--tool=ruff",
                         "--die-on-tool-error",
                         "--output-format=pylint",
-                        "--profile=.prospector.yaml,utils:unsafe",
+                        "--profile=.prospector.yaml",
+                        "--profile=utils:unsafe",
                     ]
                     current_deps = [
                         deps.split("=")[0]
@@ -1669,32 +1674,24 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             pre_commit_config.add_commented_additional_dependencies(
                                 prospector_hooks, [deps], "pypi"
                             )
-                    # if len(prospector_hooks) == 1:
-                    #    if not os.path.exist(".prospector-test.yaml"):
-                    #        with mra.EditYAML(".prospector-test.yaml") as prospector_test:
-                    #            prospector_test['inherits'] = [
-                    #                'duplicated',
-                    #                'utils:tests',
-                    #            ]
-                    #    pre_commit_config.add_hook(
-                    #        "https://github.com/PyCQA/prospector",
-                    #        {
-                    #            "id": "prospector",
-                    #            "args": [
-                    #                "--tool=ruff",
-                    #                "--die-on-tool-error",
-                    #                "--output-format=pylint",
-                    #                "--profile=.prospector-test.yaml,utils:unsafe",
-                    #            ],
-                    #            "additional_dependencies": [
-                    #                "prospector-profile-duplicated=="
-                    #                + _VERSIONS["prospector-profile-duplicated"],
-                    #                "prospector-profile-utils=="
-                    #                + _VERSIONS["prospector-profile-utils"],
-                    #                "ruff==" + _VERSIONS["ruff"],
-                    #            ],
-                    #        },
-                    #    )
+                    if len(prospector_hooks) == 1:
+                        pre_commit_config.add_hook(
+                            "https://github.com/PyCQA/prospector",
+                            {
+                                "id": "prospector",
+                                "args": [
+                                    "--die-on-tool-error",
+                                    "--output-format=pylint",
+                                    "--profile=utils:tests",
+                                    "--profile=utils:unsafe",
+                                ],
+                                "additional_dependencies": [
+                                    "prospector-profile-utils=="
+                                    + _VERSIONS["prospector-profile-utils"],
+                                    "ruff==" + _VERSIONS["ruff"],
+                                ],
+                            },
+                        )
 
                 pre_commit_config.add_repo(
                     "https://github.com/sbrunner/python-versions-hook",
