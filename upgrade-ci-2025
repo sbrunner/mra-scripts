@@ -1392,6 +1392,10 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
         # put profile base at first, group at second, and stabilization-branches as thirst.
         def cmp(extend1, extend2) -> int:
+            if isinstance(extend1, mra.JSON5RowAttribute):
+                extend1 = extend1.value
+            if isinstance(extend2, mra.JSON5RowAttribute):
+                extend2 = extend2.value
             for preset in ["base", "group", "stabilization-branches"]:
                 if extend1.startswith(
                     f"github>camptocamp/gs-renovate-config-preset:{preset}"
@@ -1403,8 +1407,8 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                     return 1
             return 0
 
-        renovate_config["extends"] = sorted(
-            renovate_config["extends"], key=functools.cmp_to_key(cmp)
+        renovate_config["extends"] = mra.JSON5List(
+            sorted(renovate_config["extends"], key=functools.cmp_to_key(cmp))
         )
 
         for property in (
