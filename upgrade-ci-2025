@@ -1360,6 +1360,8 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         for new_extend in (
             "github>camptocamp/gs-renovate-config-preset:base.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "github>camptocamp/gs-renovate-config-preset:group.json5#"
+            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:preset.json5#"
             + _VERSIONS["camptocamp/gs-renovate-config-preset"],
             "github>camptocamp/gs-renovate-config-preset:ci.json5#"
