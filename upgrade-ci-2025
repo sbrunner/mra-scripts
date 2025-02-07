@@ -827,8 +827,6 @@ def _clean_update_workflow(task_env: TaskEnv) -> None:
         with mra.EditYAML(workflow_filename) as yaml:
             for job in yaml["jobs"].values():
                 for step in job["steps"]:
-                    if "uses" in step:
-                        print(step["uses"])
                     for action, version in [
                         ("actions/cache", "v1"),
                         ("actions/cache", "v2"),
@@ -1268,11 +1266,15 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
             for inherit in (
                 "utils:base",
                 "utils:fix",
-                # "utils:unsafe",
                 *(["utils:c2cwsgiutils"] if use_c2cwsgiutils else []),
             ):
                 if inherit not in prospector_config.get("inherits", []):
                     prospector_config["inherits"].append(inherit)
+
+            # remove utils:unsafe from inherits
+            for inherit in prospector_config.get("inherits", []):
+                if inherit == "utils:unsafe":
+                    prospector_config["inherits"].remove(inherit)
 
             for tag in ("strictness", "max-line-length", "doc-warnings"):
                 if tag in prospector_config:
@@ -1330,19 +1332,34 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePrefixes"]
 
-        for i, extend in enumerate(renovate_config["extends"]):
-            if extend.value.startswith(
-                "github>camptocamp/gs-renovate-config-preset:preset.json5#"
-            ):
-                extend.value = (
+        for extend in renovate_config["extends"]:
+            if isinstance(extend, mra.JSON5RowAttribute):
+                if extend.value.startswith(
                     "github>camptocamp/gs-renovate-config-preset:preset.json5#"
-                    + _VERSIONS["camptocamp/gs-renovate-config-preset"]
-                )
+                ):
+                    extend.value = (
+                        "github>camptocamp/gs-renovate-config-preset:preset.json5#"
+                        + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+                    )
 
         extends = [
             e if isinstance(e, str) else e.value
             for e in renovate_config.get("extends", [])
         ]
+        extends_to_remove = [
+            e
+            for e in extends
+            if e.startswith("config:")
+            or e
+            in (
+                "group:monorepos",
+                "group:recommended",
+                "replacements:all",
+                "workarounds:all",
+            )
+        ]
+        for extend in extends_to_remove:
+            renovate_config["extends"].remove(extend)
         extends = [
             e
             for e in extends
@@ -1357,36 +1374,40 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         ]
 
         extends_base = [e.split("#")[0] for e in extends]
-        for new_extend in (
-            "github>camptocamp/gs-renovate-config-preset:base.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:group.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+        for preset in (
+            "base",
+            "group",
             *(
-                [
-                    f"github>camptocamp/gs-renovate-config-preset:stabilization-branches.json5#"
-                    + _VERSIONS["camptocamp/gs-renovate-config-preset"]
-                ]
+                ["stabilization-branches"]
                 if task_env.has_stabilization_branches
                 else []
             ),
-            "github>camptocamp/gs-renovate-config-preset:preset.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:ci.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:pre-commit.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:python.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:security.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:own.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:json-schema.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
-            "github>camptocamp/gs-renovate-config-preset:shellcheck.json5#"
-            + _VERSIONS["camptocamp/gs-renovate-config-preset"],
+            "preset",
+            "ci",
+            "pre-commit",
+            *(
+                [
+                    "python",
+                    "security",
+                ]
+                if task_env.use_python
+                else []
+            ),
+            *(
+                [
+                    "docker",
+                ]
+                if task_env.use_docker
+                else []
+            ),
+            "own",
+            "json-schema",
+            "shellcheck",
         ):
+            new_extend = (
+                f"github>camptocamp/gs-renovate-config-preset:{preset}.json5#"
+                + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+            )
             if new_extend.split("#")[0] not in extends_base:
                 renovate_config["extends"].append(new_extend)
 
@@ -1407,7 +1428,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                     return 1
             return 0
 
-        renovate_config["extends"] = mra.JSON5List(
+        renovate_config["extends"] = mra.JSON5RowList(
             sorted(renovate_config["extends"], key=functools.cmp_to_key(cmp))
         )
 
@@ -1420,6 +1441,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             "prHourlyLimit",
             "prConcurrentLimit",
             "lockFileMaintenance",
+            "semanticCommits",
         ):
             if property in renovate_config:
                 del renovate_config[property]
@@ -1476,6 +1498,9 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         )
 
         renovate_config.remove_package_rule({}, ["Update dpkg versions at any time"])
+        renovate_config.remove_regex_manager(
+            {}, ["Do update on the schema present in the ci/config.yaml"]
+        )
 
         if (
             not task_env.has_stabilization_branches
