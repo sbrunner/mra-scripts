@@ -801,6 +801,8 @@ def _update_clean_workflow(task_env: TaskEnv) -> None:
 def _clean_update_workflow(task_env: TaskEnv) -> None:
     if os.path.exists(".whitesource"):
         os.remove(".whitesource")
+    if os.path.exists(".pylintrc"):
+        os.remove(".pylintrc")
     if os.path.exists(".github/changelog-config.yaml"):
         os.remove(".github/changelog-config.yaml")
     if os.path.exists(".github/workflows/changelog.yaml"):
@@ -1443,6 +1445,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             "semanticCommits",
             "osvVulnerabilityAlerts",
             "vulnerabilityAlerts",
+            "dependencyDashboard",
         ):
             if property in renovate_config:
                 del renovate_config[property]
