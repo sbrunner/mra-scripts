@@ -91,7 +91,7 @@ repos:
           - --profile=utils:unsafe
         additional_dependencies:
           - prospector-profile-duplicated==1.10.4 # pypi
-          - prospector-profile-utils==1.19.1 # pypi
+          - prospector-profile-utils==1.19.2 # pypi
           - ruff==0.9.5 # pypi
       - id: prospector
         args:
