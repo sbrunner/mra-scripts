@@ -1343,14 +1343,14 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                     )
 
         extends = [
-            e if isinstance(e, str) else e.value
+            (e, e if isinstance(e, str) else e.value)
             for e in renovate_config.get("extends", [])
         ]
         extends_to_remove = [
-            e
-            for e in extends
-            if e.startswith("config:")
-            or e
+            (e, v)
+            for e, v in extends
+            if v.startswith("config:")
+            or v
             in (
                 "group:monorepos",
                 "group:recommended",
@@ -1358,13 +1358,13 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 "workarounds:all",
             )
         ]
-        for extend in extends_to_remove:
+        for extend, _ in extends_to_remove:
             renovate_config["extends"].remove(extend)
         extends = [
-            e
-            for e in extends
-            if not e.startswith("config:")
-            and e
+            v
+            for _, v in extends
+            if not v.startswith("config:")
+            and v
             not in (
                 "group:monorepos",
                 "group:recommended",
@@ -1745,7 +1745,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     ]:
                         if deps.split("=")[0] not in current_deps:
                             pre_commit_config.add_commented_additional_dependencies(
-                                prospector_hooks, [deps], "pypi"
+                                prospector_hooks[0], [deps], "pypi"
                             )
                     if len(prospector_hooks) == 1:
                         pre_commit_config.add_hook(
@@ -1758,13 +1758,17 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                     "--profile=utils:tests",
                                     "--profile=utils:autofix",
                                 ],
-                                "additional_dependencies": [
-                                    "prospector-profile-utils=="
-                                    + _VERSIONS["prospector-profile-utils"],
-                                    "ruff==" + _VERSIONS["ruff"],
-                                ],
                             },
                             force=True,
+                        )
+                        pre_commit_config.add_commented_additional_dependencies(
+                            prospector_hooks[1],
+                            [
+                                "prospector-profile-utils=="
+                                + _VERSIONS["prospector-profile-utils"],
+                                "ruff==" + _VERSIONS["ruff"],
+                            ],
+                            "pypi",
                         )
 
                 pre_commit_config.add_repo(

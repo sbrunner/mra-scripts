@@ -88,7 +88,7 @@ repos:
           - --die-on-tool-error
           - --output-format=pylint
           - --profile=.prospector.yaml
-          - --profile=utils:unsafe
+          - --profile=utils:autofix
         additional_dependencies:
           - prospector-profile-duplicated==1.10.4 # pypi
           - prospector-profile-utils==1.19.2 # pypi
@@ -98,7 +98,7 @@ repos:
           - --die-on-tool-error
           - --output-format=pylint
           - --profile=utils:tests
-          - --profile=utils:unsafe
+          - --profile=utils:autofix
         additional_dependencies:
           - prospector-profile-utils==1.19.0
           - ruff==0.9.4
