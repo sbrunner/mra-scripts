@@ -1428,10 +1428,9 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                     return 1
             return 0
 
-        renovate_config["extends"] = mra.JSON5RowList(
+        renovate_config["extends"] = mra.JSON5List(
             sorted(renovate_config["extends"], key=functools.cmp_to_key(cmp))
         )
-
         for property in (
             "timezone",
             "schedule",
@@ -1442,6 +1441,8 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
             "prConcurrentLimit",
             "lockFileMaintenance",
             "semanticCommits",
+            "osvVulnerabilityAlerts",
+            "vulnerabilityAlerts",
         ):
             if property in renovate_config:
                 del renovate_config[property]
@@ -1727,7 +1728,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "--die-on-tool-error",
                         "--output-format=pylint",
                         "--profile=.prospector.yaml",
-                        "--profile=utils:unsafe",
+                        "--profile=utils:autofix",
                     ]
                     current_deps = [
                         deps.split("=")[0]
@@ -1755,7 +1756,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                     "--die-on-tool-error",
                                     "--output-format=pylint",
                                     "--profile=utils:tests",
-                                    "--profile=utils:unsafe",
+                                    "--profile=utils:autofix",
                                 ],
                                 "additional_dependencies": [
                                     "prospector-profile-utils=="
