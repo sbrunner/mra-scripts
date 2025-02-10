@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 
 # TODO:
-#    "Development Status :: 5 - Production/Stable",
-#    "Environment :: Console",
-#    "Operating System :: OS Independent",
-#    "Programming Language :: Python",
-#    "Intended Audience :: Developers",
-#    "License :: OSI Approved :: MIT License",
-#    "Typing :: Typed",
-
+# Warning: [tool.poetry.name] is deprecated. Use [project.name] instead.
+# Warning: [tool.poetry.version] is set but 'version' is not in [project.dynamic]. If it is static use [project.version]. If it is dynamic, add 'version' to [project.dynamic].
+# If you want to set the version dynamically via `poetry build --local-version` or you are using a plugin, which sets the version dynamically, you should define the version in [tool.poetry] and add 'version' to [project.dynamic].
+# Warning: [tool.poetry.description] is deprecated. Use [project.description] instead.
+# Warning: [tool.poetry.readme] is set but 'readme' is not in [project.dynamic]. If it is static use [project.readme]. If it is dynamic, add 'readme' to [project.dynamic].
+# If you want to define multiple readmes, you should define them in [tool.poetry] and add 'readme' to [project.dynamic].
+# Warning: [tool.poetry.license] is deprecated. Use [project.license] instead.
+# Warning: [tool.poetry.authors] is deprecated. Use [project.authors] instead.
+# Warning: [tool.poetry.keywords] is deprecated. Use [project.keywords] instead.
+# Warning: [tool.poetry.classifiers] is set but 'classifiers' is not in [project.dynamic]. If it is static use [project.classifiers]. If it is dynamic, add 'classifiers' to [project.dynamic].
+# ATTENTION: Per default Poetry determines classifiers for supported Python versions and license automatically. If you define classifiers in [project], you disable the automatic enrichment. In other words, you have to define all classifiers manually. If you want to use Poetry's automatic enrichment of classifiers, you should define them in [tool.poetry] and add 'classifiers' to [project.dynamic].
+# Warning: [tool.poetry.homepage] is deprecated. Use [project.urls] instead.
+# Warning: [tool.poetry.repository] is deprecated. Use [project.urls] instead.
+# Warning: [tool.poetry.extras] is deprecated. Use [project.optional-dependencies] instead.
+# Warning: Defining console scripts in [tool.poetry.scripts] is deprecated. Use [project.scripts] instead. ([tool.poetry.scripts] should only be used for scripts of type 'file').
 
 import glob
 import os
@@ -1872,8 +1879,9 @@ def _get_env() -> TaskEnv:
     # Get the version of c2cciutils
     c2cciutils_version = version.parse("1.6.0")
     set_c2cciutils_version = False
-    if os.path.exists("ci/requirements.txt"):
-        with mra.Edit("ci/requirements.txt") as requirements_txt:
+    requirements = Path("ci/requirements.txt")
+    if requirements.exists():
+        with mra.Edit(requirements) as requirements_txt:
             requirements = [
                 r
                 for r in requirements_txt.data.split("\n")
