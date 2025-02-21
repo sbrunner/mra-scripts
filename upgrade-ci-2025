@@ -25,15 +25,15 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Optional
 import functools
-import c2cciutils
 import multi_repo_automation as mra
 import ruamel.yaml.comments
 import ruamel.yaml.scalarstring
 import tomlkit.items
 import yaml as py_yaml
 from packaging import version
+from githubkit import GitHub
 
 # if os.path.exists(".github/renovate.json5"):
 # if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
@@ -45,6 +45,32 @@ from packaging import version
 _VERSIONS = {}
 with open(Path(__file__).parent / "versions.yaml", encoding="utf-8") as f:
     _VERSIONS = py_yaml.load(f, Loader=py_yaml.SafeLoader)
+
+
+def gopass(key: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Get a value from gopass.
+
+    Arguments:
+        key: The key to get
+        default: the value to return if gopass is not found
+
+    Return the value
+
+    """
+    try:
+        return subprocess.check_output(["gopass", "show", key]).strip().decode()
+    except FileNotFoundError:
+        if default is not None:
+            return default
+        raise
+
+
+_TOKEN = (
+    os.environ["GITHUB_TOKEN"].strip()
+    if "GITHUB_TOKEN" in os.environ
+    else gopass("gs/ci/github/token/gopass")
+)
 
 
 class Config:
@@ -75,6 +101,7 @@ class Config:
 
 
 class TaskEnv(NamedTuple):
+    github: GitHub
     c2cciutils_version: version.Version
     set_c2cciutils_version: bool
     use_python: bool
@@ -154,23 +181,16 @@ def _get_repository() -> str:
     return "camptocamp/project"
 
 
-def _get_master_branch(repo: list[str]) -> tuple[str, bool]:
+def _get_master_branch(task_env: TaskEnv, repo: list[str]) -> tuple[str, bool]:
     """Get the name of the master branch."""
     master_branch = "master"
     success = False
     try:
-        default_branch_json = c2cciutils.graphql(
-            "default_branch.graphql", {"name": repo[1], "owner": repo[0]}, default=False
-        )
-        success = default_branch_json is not False
-        master_branch = (
-            default_branch_json["repository"]["defaultBranchRef"]["name"]
-            if success
-            else "master"
-        )
-    except RuntimeError as runtime_error:
+        repo = task_env.github.get_repo(repo[0], repo[1])
+        return repo.default_branch, True
+    except Exception as runtime_error:
         print(runtime_error)
-        print("::warning::Fallback to master")
+        print("::warning::Fallback to get default branch name")
     return master_branch, success
 
 
@@ -1966,6 +1986,7 @@ def _get_env() -> TaskEnv:
     stabilization_branches = mra.get_stabilization_branches(config.repo)
 
     return TaskEnv(
+        GitHub(_TOKEN),
         c2cciutils_version,
         set_c2cciutils_version,
         use_python,
