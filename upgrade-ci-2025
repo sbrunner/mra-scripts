@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # TODO:
+# add  $schema: 'https://docs.renovatebot.com/renovate-schema.json', in renovate configuration
 # https://github.com/tox-dev/pyproject-fmt
 #
 # Warning: [tool.poetry.name] is deprecated. Use [project.name] instead.
@@ -24,7 +25,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, AnyStr, NamedTuple, Optional, Union
+from typing import Any, NamedTuple
 import functools
 import c2cciutils
 import multi_repo_automation as mra
@@ -88,118 +89,6 @@ class TaskEnv(NamedTuple):
     gopass: bool
     token: str
     config: Config
-
-
-def _order_keys(
-    data: dict[str, Any], first_keys: list[str], last_keys: Optional[list[str]] = None
-) -> ruamel.yaml.comments.CommentedMap:
-    if last_keys is None:
-        last_keys = []
-
-    # use order: <first_keys>, <other>, <last_keys>
-    new_data = []
-    for key in first_keys:
-        if key in data:
-            new_data.append((key, data[key]))
-
-    new_data += [e for e in data.items() if e[0] not in [*first_keys, *last_keys]]
-
-    for key in last_keys:
-        if key in data:
-            new_data.append((key, data[key]))
-
-    return ruamel.yaml.comments.CommentedMap(new_data)
-
-
-def _order_sub_keys(
-    data: Union[dict[str, dict[str, Any]], list[dict[str, AnyStr]]],
-    first_keys: list[str],
-    last_keys: Optional[list[str]] = None,
-) -> None:
-    items = data.items() if isinstance(data, dict) else enumerate(data)
-    for key, value in items:
-        # copy the last comment
-        comment = None
-        if hasattr(value, "ca"):
-            last_value = list(value.values())[-1]
-            if isinstance(last_value, dict) and hasattr(last_value, "ca"):
-                last_last_key = list(last_value.keys())[-1]
-                comment = last_value.ca.items.get(last_last_key)
-                if comment is not None:
-                    del last_value.ca.items[last_last_key]
-            else:
-                comment = value.ca.items.get(list(value.keys())[-1])
-        data[key] = _order_keys(value, first_keys, last_keys)
-        if comment is not None:
-            last_key = list(data[key].keys())[-1]
-            if isinstance(data[key][last_key], ruamel.yaml.comments.CommentedMap):
-                last_last_key = list(data[key][last_key].keys())[-1]
-                data[key][last_key].ca.items[last_last_key] = comment
-            else:
-                data[key].ca.items[last_key] = comment
-
-
-def _canonicalize_workflow(workflow: mra.EditYAML) -> None:
-    workflow.data = _order_keys(
-        workflow.data, ["name", "on", "permissions", "env"], ["jobs"]
-    )
-
-    # Add space after simple key
-    for key in ["name"]:
-        workflow.data.ca.items[key] = [
-            None,
-            None,
-            ruamel.yaml.CommentToken("\n\n", ruamel.yaml.error.CommentMark(0), None),
-            None,
-        ]
-
-    # add space after complex keys
-    for key in ["on", "permissions", "env", "jobs"]:
-        workflow.data.ca.items[key] = [
-            None,
-            [ruamel.yaml.CommentToken("\n", ruamel.yaml.error.CommentMark(0), None)],
-            None,
-            None,
-        ]
-
-    for name, job in workflow["jobs"].items():
-        job = _order_keys(
-            job,
-            ["name", "runs-on", "timeout-minutes", "if", "concurrency", "needs"],
-            ["strategy", "env", "steps"],
-        )
-        workflow["jobs"][name] = job
-
-        for key in reversed(
-            ["name", "runs-on", "timeout-minutes", "if", "concurrency", "needs"]
-        ):
-            if key in job:
-                job.ca.items[key] = [
-                    None,
-                    None,
-                    ruamel.yaml.CommentToken(
-                        "\n\n", ruamel.yaml.error.CommentMark(0), None
-                    ),
-                    None,
-                ]
-                break
-
-        for key in reversed(["strategy", "env"]):
-            if key in job:
-                job.ca.items[key] = [
-                    None,
-                    None,
-                    ruamel.yaml.CommentToken(
-                        "\n\n", ruamel.yaml.error.CommentMark(0), None
-                    ),
-                    None,
-                ]
-
-        for job in workflow["jobs"].values():
-            if "steps" in job:
-                _order_sub_keys(
-                    job["steps"], ["name"], ["uses", "with", "run", "env", "if"]
-                )
 
 
 def _create_labels(task_env: TaskEnv) -> None:
@@ -292,7 +181,6 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
 
     repository = _get_repository()
     repo = repository.split("/")
-    master_branch, _ = _get_master_branch(repo)
 
     # _merge(
     #    {
@@ -330,7 +218,14 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
         ).stdout
     )
 
-    publish_config = _merge(c2cciutils.configuration.PUBLISH_DEFAULT, {})
+    publish_config = _merge(
+        {
+            "pypi": {"versions": ["version_tag"], "packages": "<auto-detected>"},
+            "docker": {"images": "<auto-detected>"},
+            "helm": {"versions": ["version_tag"], "folders": "<auto-detected>"},
+        },
+        {},
+    )
     publish_config["pypi"]["packages"] = [{"path": "."}] if has_python_package else []
     publish_config["docker"]["images"] = (
         [{"name": _get_repository()}] if has_docker_files else []
@@ -348,6 +243,11 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tag_publish_config(task_env: TaskEnv) -> None:
+    if not mra.git_grep("tag-publish") and not mra.git_grep("c2cciutils-publish"):
+        if os.path.exists(".github/publish.yaml"):
+            os.remove(".github/publish.yaml")
+        return
+
     if os.path.exists(".github/publish.yaml"):
         return
 
@@ -364,6 +264,7 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
     if os.path.exists("ci/dpkg-versions.yaml"):
         mra.run(["git", "mv", "ci/dpkg-versions.yaml", ".github/"])
 
+    to_remove = False
     with mra.EditYAML(Path(".github/publish.yaml")) as publish:
         publish.data = filled_config["publish"]
         if "helm" in publish and "folders" in publish["helm"]:
@@ -386,7 +287,9 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
             "versions", []
         ) == ["version_tag"]:
             del publish["helm"]["versions"]
-        if "repository" in publish.get("docker", {}):
+        if publish.get("docker", False) is not False and "repository" in publish.get(
+            "docker", {}
+        ):
             del publish["docker"]["repository"]
         if "print_versions" in publish:
             del publish["print_versions"]
@@ -426,6 +329,11 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
                     new_versions.append(version)
             return new_versions
 
+        if publish.get("docker", False) is not False:
+            for image in publish["docker"].get("images", []):
+                if image.get("tags", []) == ["{version}"]:
+                    del image["tags"]
+
         if publish.get("docker", False) is not False and "versions" in publish.get(
             "docker", {}
         ):
@@ -454,8 +362,8 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
                 len(branch_to_version_re) == 2
                 and branch_to_version_re[0].get("from") == r"([0-9]+.[0-9]+)"
                 and branch_to_version_re[0].get("to") == r"\1"
-                and branch_to_version_re[1].get("from") == "master"
-                and branch_to_version_re[1].get("to") == "master"
+                and branch_to_version_re[1].get("from")
+                == branch_to_version_re[1].get("to")
             ):
                 del publish["version"]["branch_to_version_re"]
             else:
@@ -463,6 +371,13 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
                     "branch_to_version_re"
                 ]
                 del publish["version"]["branch_to_version_re"]
+        for branch_to_version in publish.get("version", {}).get(
+            "branch_to_version", []
+        ):
+            if "from" in branch_to_version:
+                branch_to_version["from_re"] = branch_to_version["from"]
+                del branch_to_version["from"]
+
         if "tag_to_version_re" in publish.get("version", {}):
             if publish["version"]["tag_to_version_re"] == {
                 {"from": r"([0-9]+.[0-9]+.[0-9]+)", "to": r"\1"},
@@ -473,6 +388,30 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
                     "tag_to_version_re"
                 ]
                 del publish["version"]["tag_to_version_re"]
+        for tag_to_version in publish.get("version", {}).get("tag_to_version", []):
+            if "from" in tag_to_version:
+                tag_to_version["from_re"] = tag_to_version["from"]
+                del tag_to_version["from"]
+
+        index_to_remove = []
+        for nb, branch_to_version in enumerate(
+            publish.get("version", {}).get("branch_to_version", [])
+        ):
+            if branch_to_version.get("to") == "\\1":
+                index_to_remove.append(nb)
+        for nb in reversed(index_to_remove):
+            del publish["version"]["branch_to_version"][nb]
+        if (
+            "branch_to_version" in publish.get("version", {})
+            and not publish["version"]["branch_to_version"]
+        ):
+            del publish["version"]["branch_to_version"]
+        if "version" in publish and not publish["version"]:
+            del publish["version"]
+
+        if "version" in publish:
+            publish["transformers"] = publish["version"]
+            del publish["version"]
 
         if "repository" in publish.get("docker", {}):
             for repository in publish["docker"]["repository"].values():
@@ -484,6 +423,10 @@ def _tag_publish_config(task_env: TaskEnv) -> None:
                         repository["versions"]
                     )
                     del repository["versions"]
+
+        to_remove = list(publish.keys()) == ["dispatch"]
+    if to_remove:
+        os.remove(".github/publish.yaml")
 
     rm_config = False
     if ci_config.exists():
@@ -601,12 +544,13 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
         with mra.EditYAML(Path(".github/workflows/main.yaml")) as yaml:
             _update_workflow_venv(task_env, yaml)
 
-            permissions = yaml.setdefault("permissions", {})
-            permissions["contents"] = "write"
-            if task_env.use_docker:
-                permissions["packages"] = "write"
-            if task_env.use_pypi:
-                permissions["id-token"] = "write"
+            if mra.git_grep("tag-publish") or mra.git_grep("c2cciutils-publish"):
+                permissions = yaml.setdefault("permissions", {})
+                permissions["contents"] = "write"
+                if task_env.use_docker:
+                    permissions["packages"] = "write"
+                if task_env.use_pypi:
+                    permissions["id-token"] = "write"
 
             for job_name, job in yaml["jobs"].items():
                 pre_commit_index = -1
@@ -708,7 +652,7 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                             job["steps"].insert(
                                 index + index_add + 1,
                                 {
-                                    "uses": "actions/upload-artifact@v"
+                                    "uses": "actions/upload-artifact@"
                                     + _VERSIONS["actions/upload-artifact"],
                                     "with": {
                                         "name": f"{artifact_name}.patch",
@@ -814,9 +758,6 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
             #             job["steps"].insert(0, step)
             #         else:
             #             job["steps"].append(step)
-
-            if not task_env.on_stabilization_branches or yaml.is_modified():
-                _canonicalize_workflow(yaml)
 
 
 def _update_audit_workflow(task_env: TaskEnv) -> None:
@@ -1063,9 +1004,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                             )
                         )
                     }
-
-        if not task_env.on_stabilization_branches or yaml.is_modified():
-            _canonicalize_workflow(yaml)
 
 
 class _PythonVersion:
@@ -1398,6 +1336,7 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 "group:recommended",
                 "replacements:all",
                 "workarounds:all",
+                ":semanticCommitsDisabled",
             )
         ]
         for extend in extends_to_remove:
@@ -1610,14 +1549,26 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     },
                 )
 
-            pre_commit_config.add_repo(
-                "https://github.com/sbrunner/jsonschema-validator",
-                _VERSIONS["sbrunner/jsonschema-validator"],
-            )
-            pre_commit_config.add_hook(
-                "https://github.com/sbrunner/jsonschema-validator",
-                {"id": "jsonschema-validator"},
-            )
+            filenames = {
+                Path(".github/publish.yaml"),
+                Path(".github/ghci.yaml"),
+                Path("jsonschema_gentype.yaml"),
+                Path("ci/config.yaml"),
+            }
+            one_exists = False
+            for filepath in filenames:
+                if filepath.exists():
+                    one_exists = True
+                    break
+            if one_exists:
+                pre_commit_config.add_repo(
+                    "https://github.com/sbrunner/jsonschema-validator",
+                    _VERSIONS["sbrunner/jsonschema-validator"],
+                )
+                pre_commit_config.add_hook(
+                    "https://github.com/sbrunner/jsonschema-validator",
+                    {"id": "jsonschema-validator"},
+                )
             for repo in pre_commit_config["repos"]:
                 if repo["repo"] == "https://github.com/sbrunner/jsonschema-validator":
                     files = repo["hooks"][0].get("files", "").strip()
@@ -1634,12 +1585,6 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     files_split = [f.lstrip("|") for f in files_split]
                     files_split = [f for f in files_split if f]
 
-                    filenames = {
-                        ".github/publish.yaml",
-                        ".github/ghci.yaml",
-                        "jsonschema_gentype.yaml",
-                        "ci/config.yaml",
-                    }
                     filenames_proc = mra.run(
                         ["git", "grep", r"# yaml-language-server: \$schema=https://"],
                         stdout=subprocess.PIPE,
@@ -1652,7 +1597,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                 if filename.endswith(".yaml"):
                                     filenames |= {filename}
                     for filename in filenames:
-                        filename_re = re.escape(filename)
+                        filename_re = re.escape(str(filename))
                         if os.path.exists(filename):
                             if filename_re not in files_split:
                                 files_split.append(filename_re)
@@ -1706,6 +1651,17 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         ],
                     },
                 )
+
+            pre_commit_config.add_repo(
+                "https://github.com/sbrunner/hooks",
+                _VERSIONS["sbrunner/hooks"],
+            )
+            pre_commit_config.add_hook(
+                "https://github.com/sbrunner/hooks",
+                {
+                    "id": "canonicalize",
+                },
+            )
 
             for repo in pre_commit_config["repos"]:
                 if (
@@ -2096,13 +2052,6 @@ def _do() -> None:
 
 
 if __name__ == "__main__":
-    # edit the file /home/sbrunner/workspace/docker-vim/.github/workflows/changelog.yaml
-    # with mra.EditYAML(Path("/home/sbrunner/workspace/docker-vim/.github/workflows/audit.yaml") as e:
-    #    _canonicalize_workflow(e)
-    # with mra.EditYAML(Path("/home/sbrunner/workspace/docker-vim/.github/workflows/changelog.yaml") as e:
-    #    _canonicalize_workflow(e)
-    # exit(0)
-
     os.environ["IGNORE_CONFIG_ERROR"] = "true"
 
     mra.main(
