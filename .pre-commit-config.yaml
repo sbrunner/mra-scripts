@@ -91,8 +91,7 @@ repos:
           - --profile=.prospector.yaml
         additional_dependencies:
           - prospector-profile-duplicated==1.10.4 # pypi
-          - prospector-profile-utils==1.21.2 # pypi
-          - ruff==0.9.6 # pypi
+          - prospector-profile-utils==1.21.4 # pypi
       - id: prospector
         args:
           - --die-on-tool-error
@@ -100,8 +99,7 @@ repos:
           - --profile=utils:tests
           - --profile=utils:pre-commit
         additional_dependencies:
-          - prospector-profile-utils==1.19.0
-          - ruff==0.9.4
+          - prospector-profile-utils==1.21.4 # pypi
   - repo: https://github.com/sbrunner/python-versions-hook
     rev: 0.8.0
     hooks:
