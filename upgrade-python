@@ -30,19 +30,13 @@ def _do() -> None:
                     if hook["id"] == "pyupgrade":
                         hook["args"] = ["--py39-plus"]
     for pyproject_toml_filename in [
-        *mra.run(
-            ["git", "ls-files", "pyproject.toml"], stdout=subprocess.PIPE
-        ).stdout.split("\n"),
-        *mra.run(
-            ["git", "ls-files", "**/pyproject.toml"], stdout=subprocess.PIPE
-        ).stdout.split("\n"),
+        *mra.run(["git", "ls-files", "pyproject.toml"], stdout=subprocess.PIPE).stdout.split("\n"),
+        *mra.run(["git", "ls-files", "**/pyproject.toml"], stdout=subprocess.PIPE).stdout.split("\n"),
     ]:
         if pyproject_toml_filename:
             with mra.Edit(pyproject_toml_filename) as pyproject_toml:
                 # Poetry
-                pyproject_toml.data = re.sub(
-                    'python = ">=3.8,', 'python = ">=3.9,', pyproject_toml.data
-                )
+                pyproject_toml.data = re.sub('python = ">=3.8,', 'python = ">=3.9,', pyproject_toml.data)
                 # Black
                 pyproject_toml.data = re.sub(
                     re.escape("target-version = ['py38']"),

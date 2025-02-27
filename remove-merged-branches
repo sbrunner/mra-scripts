@@ -33,10 +33,7 @@ def _do() -> None:
     repo_config = mra.get_repo_config()
     resume.append(f"== Repo {repo_config['name']} ==")
 
-    if (
-        mra.run(["git", "status", "--short"], stdout=subprocess.PIPE).stdout.strip()
-        != ""
-    ):
+    if mra.run(["git", "status", "--short"], stdout=subprocess.PIPE).stdout.strip() != "":
         resume.append("Your repository should be clean")
         resume.append("Use `git reset --hard` and `git clean -fd` to clean it")
         return
@@ -47,20 +44,13 @@ def _do() -> None:
     ).stdout.strip()
 
     try:
-        remotes = (
-            mra.run(["git", "remote"], stdout=subprocess.PIPE)
-            .stdout.strip()
-            .split("\n")
-        )
+        remotes = mra.run(["git", "remote"], stdout=subprocess.PIPE).stdout.strip().split("\n")
         remote = "origin"
         if "upstream" in remotes:
             remote = "upstream"
 
         all_branches = [
-            b.strip()
-            for b in mra.run(["git", "branch"], stdout=subprocess.PIPE)
-            .stdout.strip()
-            .split("\n")
+            b.strip() for b in mra.run(["git", "branch"], stdout=subprocess.PIPE).stdout.strip().split("\n")
         ]
         print(f"== Branches: {', '.join(all_branches)}")
 
@@ -69,9 +59,7 @@ def _do() -> None:
 
         all_branches_with_remote = [
             b.strip()
-            for b in mra.run(["git", "branch", "--all"], stdout=subprocess.PIPE)
-            .stdout.strip()
-            .split("\n")
+            for b in mra.run(["git", "branch", "--all"], stdout=subprocess.PIPE).stdout.strip().split("\n")
         ]
         all_remote_branches = [
             b[len(f"remotes/{remote}/") :]
@@ -80,12 +68,8 @@ def _do() -> None:
         ]
         re1_ = re.compile(r"^release_[0-9]+$")
         re2_ = re.compile(r"^[0-9]+\.[0-9]+$")
-        all_remote_branches_filtered = [
-            b for b in all_remote_branches if re1_.match(b) or re2_.match(b)
-        ]
-        stabilization_branches = list(
-            {*stabilization_branches, *all_remote_branches_filtered}
-        )
+        all_remote_branches_filtered = [b for b in all_remote_branches if re1_.match(b) or re2_.match(b)]
+        stabilization_branches = list({*stabilization_branches, *all_remote_branches_filtered})
 
         temp_branch = ""
         for branch in all_branches:
@@ -197,9 +181,7 @@ def _do() -> None:
                         mra.run(["git", "branch", "-D", branch])
                 finally:
                     mra.run(["git", "reset", "--hard"])
-                    proc = mra.run(
-                        ["git", "checkout", original_branch], exit_on_error=False
-                    )
+                    proc = mra.run(["git", "checkout", original_branch], exit_on_error=False)
                     if proc.returncode != 0:
                         mra.run(
                             [
