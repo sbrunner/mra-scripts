@@ -107,6 +107,8 @@ class TaskEnv(NamedTuple):
     use_python: bool
     # min_python_version: str
     # max_python_version: str
+    pyproject_path: str
+    prospector_path: str
     use_pypi: bool
     use_docker: bool
     use_helm: bool
@@ -1026,13 +1028,6 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                     }
 
 
-class _PythonVersion:
-    def __init__(self, version: str) -> None:
-        version_split = version.split(".")
-        self.major = int(version_split[0])
-        self.minor = int(version_split[1])
-
-
 def _update_pyproject_toml(task_env: TaskEnv) -> None:
     """
     Add or update the Poetry extensions to the pyproject.toml file.
@@ -1337,10 +1332,18 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
                 if extend.value.startswith(
                     "github>camptocamp/gs-renovate-config-preset:preset.json5#"
                 ):
-                    extend.value = (
-                        "github>camptocamp/gs-renovate-config-preset:preset.json5#"
-                        + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+                    preset_version = version.parse(
+                        extend.value[
+                            len(
+                                "github>camptocamp/gs-renovate-config-preset:preset.json5#"
+                            ) :
+                        ]
                     )
+                    if preset_version < version.parse("0.8.0"):
+                        extend.value = (
+                            "github>camptocamp/gs-renovate-config-preset:preset.json5#"
+                            + _VERSIONS["camptocamp/gs-renovate-config-preset"]
+                        )
 
         extends = [
             (e, e if isinstance(e, str) else e.value)
@@ -1715,7 +1718,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             continue_ = True
                             break
 
-                if Path(".prospector.yaml").exists():
+                if task_env.prospector_path:
                     pre_commit_config.add_repo(
                         "https://github.com/PyCQA/prospector",
                         _VERSIONS["PyCQA/prospector"],
@@ -1724,6 +1727,11 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                         "https://github.com/PyCQA/prospector",
                         {
                             "id": "prospector",
+                            "args": [
+                                "--die-on-tool-error",
+                                "--output-format=pylint",
+                                f"--profile={task_env.prospector_path}",
+                            ],
                         },
                     )
                     if (
@@ -1736,11 +1744,18 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             "https://github.com/PyCQA/prospector"
                         ]["hooks"]["prospector"]
                         prospector_hooks[0]["args"] = [
-                            "--tool=ruff",
-                            "--die-on-tool-error",
-                            "--output-format=pylint",
-                            "--profile=.prospector.yaml",
-                            "--profile=utils:autofix",
+                            arg
+                            for arg in prospector_hooks[0]["args"]
+                            if not arg.startswith("--tool=")
+                            and arg
+                            not in (
+                                "--profile=utils:autofix",
+                                "--profile=utils:pre-commit",
+                            )
+                        ]
+                        prospector_hooks[0]["args"] = [
+                            "--profile=utils:pre-commit",
+                            *prospector_hooks[0]["args"],
                         ]
                         current_deps = [
                             deps.split("=")[0]
@@ -1753,7 +1768,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             + _VERSIONS["prospector-profile-duplicated"],
                             "prospector-profile-utils=="
                             + _VERSIONS["prospector-profile-utils"],
-                            "ruff==" + _VERSIONS["ruff"],
+                            # "ruff==" + _VERSIONS["ruff"],
                         ]:
                             if deps.split("=")[0] not in current_deps:
                                 pre_commit_config.add_commented_additional_dependencies(
@@ -1768,7 +1783,7 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                         "--die-on-tool-error",
                                         "--output-format=pylint",
                                         "--profile=utils:tests",
-                                        "--profile=utils:autofix",
+                                        "--profile=utils:pre-commit",
                                     ],
                                 },
                                 force=True,
@@ -1778,10 +1793,24 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                                 [
                                     "prospector-profile-utils=="
                                     + _VERSIONS["prospector-profile-utils"],
-                                    "ruff==" + _VERSIONS["ruff"],
+                                    # "ruff==" + _VERSIONS["ruff"],
                                 ],
                                 "pypi",
                             )
+                        else:
+                            prospector_hooks[1]["args"] = [
+                                arg
+                                for arg in prospector_hooks[1]["args"]
+                                if not arg.startswith("--tool=")
+                                and arg != "--profile=utils:autofix"
+                            ]
+                            if (
+                                "--profile=utils:pre-commit"
+                                not in prospector_hooks[1]["args"]
+                            ):
+                                prospector_hooks[1]["args"].append(
+                                    "--profile=utils:pre-commit"
+                                )
                 pre_commit_config.add_repo(
                     "https://github.com/astral-sh/ruff-pre-commit",
                     _VERSIONS["astral-sh/ruff-pre-commit"],
@@ -1945,15 +1974,31 @@ def _get_env() -> TaskEnv:
             c2cciutils_version = version.parse(c2cciutils_version_config)
             set_c2cciutils_version = True
 
+    prospector_path = None
+    prospector_candidate_path = [
+        Path(".prospector.yaml"),
+        Path("app/.prospector.yaml"),
+        Path("api/.prospector.yaml"),
+        Path("docker/.prospector.yaml"),
+    ]
+
     use_python = False
+    pyproject_path = None
+    for prospector_path_candidate in prospector_candidate_path:
+        if prospector_path_candidate.exists():
+            prospector_path = prospector_path_candidate
+            break
+
     # min_python_version = ''
     # max_python_version = ''
     for pyproject_filename in (
         Path("pyproject.toml"),
         Path("app/pyproject.toml"),
         Path("api/pyproject.toml"),
+        Path("docker/pyproject.toml"),
     ):
         if pyproject_filename.exists():
+            pyproject_path = pyproject_filename
             with mra.EditTOML(pyproject_filename) as pyproject:
                 use_python = "project" in pyproject or "build-system" in pyproject
                 # min_python_version = pyproject.get("tool", {}).get("poetry", {}).get("dependencies", {}).get("python", "")
@@ -1969,6 +2014,8 @@ def _get_env() -> TaskEnv:
 
                 break
     use_python = config.enabled("python", use_python)
+    pyproject_path = config.value("pyproject_path", pyproject_path)
+    prospector_path = config.value("prospector_path", prospector_path)
 
     use_pypi = config.enabled(
         "pypi", use_python and "no-pypi" not in config.repo.get("type", [])
@@ -1992,6 +2039,8 @@ def _get_env() -> TaskEnv:
         use_python,
         # min_python_version,
         # max_python_version,
+        pyproject_path,
+        prospector_path,
         use_pypi,
         use_docker,
         use_helm,
