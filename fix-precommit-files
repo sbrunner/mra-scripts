@@ -27,9 +27,7 @@ def fix_files(pre_commit_config, files: str) -> str:
     else:
         return files
 
-    return pre_commit_config.create_files_regex(
-        [f.strip() for f in files_list], add_start_end=add_start_end
-    )
+    return pre_commit_config.create_files_regex([f.strip() for f in files_list], add_start_end=add_start_end)
 
 
 def _do() -> None:
