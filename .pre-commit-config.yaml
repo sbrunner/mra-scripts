@@ -15,12 +15,13 @@ repos:
       - id: trailing-whitespace
       - id: mixed-line-ending
   - repo: https://github.com/sbrunner/hooks
-    rev: 1.2.1
+    rev: 1.3.0
     hooks:
       - id: copyright
       - id: poetry2-lock
         additional_dependencies:
           - poetry==2.0.1 # pypi
+      - id: canonicalize
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.1
     hooks:
@@ -84,11 +85,10 @@ repos:
     hooks:
       - id: prospector
         args:
-          - --tool=ruff
+          - --profile=utils:pre-commit
           - --die-on-tool-error
           - --output-format=pylint
           - --profile=.prospector.yaml
-          - --profile=utils:autofix
         additional_dependencies:
           - prospector-profile-duplicated==1.10.4 # pypi
           - prospector-profile-utils==1.21.2 # pypi
@@ -98,7 +98,7 @@ repos:
           - --die-on-tool-error
           - --output-format=pylint
           - --profile=utils:tests
-          - --profile=utils:autofix
+          - --profile=utils:pre-commit
         additional_dependencies:
           - prospector-profile-utils==1.19.0
           - ruff==0.9.4
