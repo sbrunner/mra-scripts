@@ -3,9 +3,9 @@ camptocamp/gs-renovate-config-preset: 0.8.5 # github-tags
 renovatebot/pre-commit-hooks: 39.182.3 # github-tags
 mheap/json-schema-spell-checker: v2.2.0 # github-tags
 astral-sh/ruff-pre-commit: v0.9.9 # github-tags
-PyCQA/prospector: v1.15.1 # github-tags
+PyCQA/prospector: v1.15.2 # github-tags
 prospector-profile-duplicated: 1.10.4 # pypi
-prospector-profile-utils: 1.21.6 # pypi
+prospector-profile-utils: 1.21.7 # pypi
 ruff: 0.9.9 # pypi
 sbrunner/python-versions-hook: 0.8.0 # github-tags
 tag-publish: 1.0.0 # pypi
