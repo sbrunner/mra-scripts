@@ -469,6 +469,28 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
                 print(f"Error in {workflow_file}: {e}")
 
 
+def _update_dockerfile(task_env: TaskEnv) -> None:
+    if not task_env.use_docker:
+        return
+
+    for dockerfile in mra.run(
+        ["git", "ls-files", "*/Dockerfile*", "Dockerfile*"], stdout=subprocess.PIPE
+    ).stdout.split("\n"):
+        if dockerfile:
+            with mra.Edit(Path(dockerfile)) as docker:
+                from_as_re = re.compile(r"FROM\s+(.*)\s+as\s+")
+                from_as_match = from_as_re.search(docker.data)
+                while from_as_match:
+                    docker.data = from_as_re.sub("FROM \\1 AS ", docker.data)
+                    from_as_match = from_as_re.search(docker.data)
+
+                if 'LABEL maintainer Camptocamp "info@camptocamp.com"' in docker.data:
+                    docker.data = docker.data.replace(
+                        'LABEL maintainer Camptocamp "info@camptocamp.com"',
+                        'LABEL org.opencontainers.image.authors="Camptocamp <info@camptocamp.com>"',
+                    )
+
+
 def _update_workflow_venv(task_env: TaskEnv, yaml: mra.EditYAML) -> None:
     if task_env.on_stabilization_branches:
         return
@@ -853,6 +875,12 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
         yaml["name"] = "Auto reviews, merge and close pull requests"
         for job in yaml["jobs"].values():
             job["name"] = "Auto reviews pull requests from bots"
+
+            # job["permissions"] = {
+            #    "contents": "write",
+            #    "pull-requests": "write",
+            # }
+
             if "if" in job:
                 del job["if"]
 
@@ -1611,6 +1639,21 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                             "--profile=utils:pre-commit",
                             *prospector_hooks[0]["args"],
                         ]
+                        if "exclude" not in prospector_hooks[0]:
+                            prospector_hooks[0]["exclude"] = ruamel.yaml.scalarstring.LiteralScalarString(
+                                "\n".join(
+                                    [
+                                        "(?x)(",
+                                        "  ^tests?/?",
+                                        "  |/tests?(/|$)",
+                                        "  |.*/tests(/|$)",
+                                        "  |(^|/)test_[_a-zA-Z0-9]+.py$",
+                                        "  |(^|/)[_a-zA-Z0-9]+_tests?.py$",
+                                        "  |(^|/)tests?.py$",
+                                        ")",
+                                    ]
+                                )
+                            )
                         current_deps = [
                             deps.split("=")[0]
                             for deps in prospector_hooks[0].get("additional_dependencies", [])
@@ -1712,38 +1755,40 @@ def _use_tag_publish(task_env: TaskEnv) -> None:
     ):
         if candidate_requirements_filename.exists():
             with mra.Edit(candidate_requirements_filename) as requirements_txt:
+                requirements_lines = requirements_txt.data.strip().split("\n")
+                for index, line in enumerate(requirements_lines):
+                    if line.startswith("tag=="):
+                        del requirements_lines[index]
                 if "c2cciutils" in requirements_txt.data:
+                    c2cciutils_index = -1
+                    c2cciutils_extra = []
+                    c2cciutils_version = ""
+                    c2cciutils_re = re.compile(r"c2cciutils\[(.*)\]==(.*)")
+                    for index, line in enumerate(requirements_lines):
+                        match = c2cciutils_re.match(line)
+                        if match is not None:
+                            c2cciutils_index = index
+                            c2cciutils_extra = match.group(1).split(",")
+                            c2cciutils_version = match.group(2)
+                            break
+
+                    if c2cciutils_index >= 0:
+                        for rm_extra in ("checks", "publish"):
+                            if rm_extra in c2cciutils_extra:
+                                c2cciutils_extra.remove(rm_extra)
+                        if c2cciutils_extra:
+                            requirements_lines[c2cciutils_index] = (
+                                "c2cciutils["
+                                + ",".join(c2cciutils_extra)
+                                + ",tag-publish]=="
+                                + c2cciutils_version
+                            )
+                        else:
+                            requirements_lines[c2cciutils_index] = "c2cciutils==" + c2cciutils_version
+
                     if "tag-publish" not in requirements_txt.data:
-                        requirements_lines = requirements_txt.data.strip().split("\n")
-                        c2cciutils_index = -1
-                        c2cciutils_extra = []
-                        c2cciutils_version = ""
-                        c2cciutils_re = re.compile(r"c2cciutils\[(.*)\]==(.*)")
-                        for index, line in enumerate(requirements_lines):
-                            match = c2cciutils_re.match(line)
-                            if match is not None:
-                                c2cciutils_index = index
-                                c2cciutils_extra = match.group(1).split(",")
-                                c2cciutils_version = match.group(2)
-                                break
-
-                        if c2cciutils_index >= 0:
-                            for rm_extra in ("checks", "publish"):
-                                if rm_extra in c2cciutils_extra:
-                                    c2cciutils_extra.remove(rm_extra)
-                            if c2cciutils_extra:
-                                requirements_lines[c2cciutils_index] = (
-                                    "c2cciutils["
-                                    + ",".join(c2cciutils_extra)
-                                    + ",tag-publish]=="
-                                    + c2cciutils_version
-                                )
-                            else:
-                                requirements_lines[c2cciutils_index] = "c2cciutils==" + c2cciutils_version
-
                         requirements_lines.append(f"tag-publish=={_VERSIONS['tag-publish']}")
-                        requirements_txt.data = "\n".join(requirements_lines) + "\n"
-                    break
+                    requirements_txt.data = "\n".join(requirements_lines) + "\n"
 
 
 def _remove_docker_compose_version(task_env: TaskEnv) -> None:
@@ -1956,6 +2001,7 @@ def _do() -> None:
             ("update-main-workflow", _update_main_workflow),
             ("update-ghci", _ghci_updates),
             ("use-tag-publish", _use_tag_publish),
+            ("update-dockerfile", _update_dockerfile),
         ):
             if task_env.config.enabled(name, True):
                 task(task_env)
