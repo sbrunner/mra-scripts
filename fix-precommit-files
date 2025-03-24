@@ -3,7 +3,6 @@
 import os
 
 import multi_repo_automation as mra
-import ruamel.yaml.comments
 
 # if os.path.exists(".github/renovate.json5"):
 # if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found

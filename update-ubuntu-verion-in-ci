@@ -2,14 +2,7 @@
 
 import subprocess
 
-import c2cciutils.security
 import multi_repo_automation as mra
-import requests
-import ruamel
-import toml
-import yaml
-from identify import identify
-from ruamel.yaml import YAML
 
 # if os.path.exists(".github/renovate.json5"):
 # if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found

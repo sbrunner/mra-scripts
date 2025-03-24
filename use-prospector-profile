@@ -4,7 +4,6 @@ import os
 import subprocess
 
 import multi_repo_automation as mra
-import ruamel.yaml.comments
 import yaml
 
 # if os.path.exists(".github/renovate.json5"):

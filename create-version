@@ -59,7 +59,7 @@ def _do() -> None:
             if stabilization_branches:
                 if "baseBranches" in renovate_config.data:
                     renovate_config.data = re.sub(
-                        rf"^( +baseBranches: \[)(.*)\]",
+                        r"^( +baseBranches: \[)(.*)\]",
                         rf"\1{json.dumps(stabilization_branches_with_master)}",
                         renovate_config.data,
                     )
