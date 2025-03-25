@@ -26,13 +26,18 @@ ignore-paths:
 
 mypy:
   run: false
-
   options:
     python-version: '3.9'
+
 bandit:
   disable:
     - B404 # Consider possible security implications associated with the subprocess module.
+    - B603 # subprocess call - check for execution of untrusted input.
+    - B607 # Starting a process with a partial executable path
 
 ruff:
   options:
     target-version: py39
+  disable:
+    - S603 # `subprocess` call: check for execution of untrusted input
+    - S607 # Starting a process with a partial executable path
