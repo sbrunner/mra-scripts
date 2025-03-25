@@ -16,9 +16,7 @@ def fix_files(pre_commit_config, files: str) -> str:
     add_start_end = False
     if files.strip().startswith("(?x)"):
         files = files.strip()[4:]
-    if files.strip().startswith("(") and files.strip().endswith(")"):
-        files_list = files.strip()[1:-1].split("|")
-    elif files.strip().startswith("(") and files.strip().endswith(")"):
+    if (files.strip().startswith("(") and files.strip().endswith(")")) or (files.strip().startswith("(") and files.strip().endswith(")")):
         files_list = files.strip()[1:-1].split("|")
     elif files.strip().startswith("^(") and files.strip().endswith(")$"):
         files_list = files.strip()[2:-2].split("|")
