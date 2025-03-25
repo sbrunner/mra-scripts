@@ -14,7 +14,8 @@ import multi_repo_automation as mra
 
 def _do() -> None:
     for workflow_file in mra.run(
-        ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
+        ["git", "ls-files", ".github/workflows/*.yaml"],
+        stdout=subprocess.PIPE,
     ).stdout.split("\n"):
         if workflow_file:
             with mra.EditYAML(workflow_file) as yaml:

@@ -43,7 +43,9 @@ def _do() -> None:
                 )
                 # mypy
                 pyproject_toml.data = re.sub(
-                    "python_version = 3.8", "python_version = 3.9", pyproject_toml.data
+                    "python_version = 3.8",
+                    "python_version = 3.9",
+                    pyproject_toml.data,
                 )
                 # classifiers
                 pyproject_toml.data = re.sub(

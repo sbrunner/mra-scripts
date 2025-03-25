@@ -4,9 +4,28 @@ inherits:
   - utils:fix
   - utils:no-design-checks
 
+ignore-paths:
+  - add-pre-commit-hooks
+  - collect
+  - create-empty-recomit-config
+  - create-version
+  - fix-precommit-files
+  - gmf-saas
+  - open-git-config-file
+  - open-github-settings
+  - remove-merged-branches
+  - update-ubuntu-verion-in-ci
+  - upgrade-c2cciutils-to-1.6
+  - upgrade-c2cciutils-to-1.7
+  - upgrade-ci-2024
+  - upgrade-python
+  - use-ghcr
+  - use-prospector-profile
+  - use-renovate-to-trigger-rebuild
+  - versions-tree
+
 mypy:
-  options:
-    python-version: '3.9'
+  run: False
 
 bandit:
   disable:

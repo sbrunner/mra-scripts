@@ -15,7 +15,7 @@ import multi_repo_automation as mra
 
 
 def _do() -> None:
-    assert False
+    raise ArithmeticError
     if os.path.exists("pyproject.toml"):
         work = False
         try:

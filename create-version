@@ -31,7 +31,7 @@ def _do() -> None:
                     new_line += f" {arguments.upstream_supported_until} |"
 
                 security_md.data = "\n".join(
-                    [*security_md_lines[:index], new_line, *security_md_lines[index:]]
+                    [*security_md_lines[:index], new_line, *security_md_lines[index:]],
                 )
 
     stabilization_branches_with_master = [
@@ -80,7 +80,8 @@ def _do() -> None:
 
 def add_arguments(args_parser):
     args_parser = args_parser.add_argument_group(
-        "new-version", "Create a new version with a stabilization branch"
+        "new-version",
+        "Create a new version with a stabilization branch",
     )
     args_parser.add_argument(
         "--version",

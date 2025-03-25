@@ -22,7 +22,8 @@ with open(
 
 def _do() -> None:
     for pyproject_toml_file_name in mra.run(
-        ["git", "ls-files", "pyproject.toml"], stdout=subprocess.PIPE
+        ["git", "ls-files", "pyproject.toml"],
+        stdout=subprocess.PIPE,
     ).stdout.split("\n"):
         if (
             pyproject_toml_file_name
@@ -64,7 +65,9 @@ def _do() -> None:
                 if repo["repo"] == "https://github.com/PyCQA/prospector":
                     for hook in repo["hooks"]:
                         pre_commit_config.add_commented_additional_dependencies(
-                            hook, ["prospector-profile-duplicated==0.1.0"], "pypi"
+                            hook,
+                            ["prospector-profile-duplicated==0.1.0"],
+                            "pypi",
                         )
 
     if os.path.exists(".prospector.yaml"):
