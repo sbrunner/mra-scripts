@@ -59,7 +59,7 @@ def gopass(key: str, default: Optional[str] = None) -> Optional[str]:
 
     """
     try:
-        return subprocess.check_output(["gopass", "show", key]).strip().decode()  # noqa: S603, S607
+        return subprocess.check_output(["gopass", "show", key]).strip().decode()
     except FileNotFoundError:
         if default is not None:
             return default
@@ -171,7 +171,7 @@ def _get_repository() -> str:
     if "GITHUB_REPOSITORY" in os.environ:
         return os.environ["GITHUB_REPOSITORY"]
 
-    remote_lines = subprocess.check_output(["git", "remote", "--verbose"]).decode().split("\n")  # noqa: S603, S607
+    remote_lines = subprocess.check_output(["git", "remote", "--verbose"]).decode().split("\n")
     remote_match = (
         re.match(r".*git@github.com:(.*).git .*", remote_lines[0]) if len(remote_lines) >= 1 else None
     )
@@ -222,21 +222,21 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
     # )
 
     has_docker_files = bool(
-        subprocess.run(  # noqa: S603
-            ["git", "ls-files", "*/Dockerfile*", "Dockerfile*"],  # noqa: S607
+        subprocess.run(
+            ["git", "ls-files", "*/Dockerfile*", "Dockerfile*"],
             stdout=subprocess.PIPE,
             check=True,
         ).stdout,
     )
     has_python_package = bool(
-        subprocess.run(  # noqa: S603
-            ["git", "ls-files", "setup.py", "*/setup.py"],  # noqa: S607
+        subprocess.run(
+            ["git", "ls-files", "setup.py", "*/setup.py"],
             stdout=subprocess.PIPE,
             check=True,
         ).stdout,
     ) or bool(
-        subprocess.run(  # noqa: S603
-            ["git", "ls-files", "pyproject.toml", "*/pyproject.toml"],  # noqa: S607
+        subprocess.run(
+            ["git", "ls-files", "pyproject.toml", "*/pyproject.toml"],
             stdout=subprocess.PIPE,
             check=True,
         ).stdout,
