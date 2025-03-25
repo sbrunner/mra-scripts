@@ -9,6 +9,7 @@ import glob
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, AnyStr, NamedTuple, Optional, Union
 
 import multi_repo_automation as mra
@@ -76,7 +77,9 @@ class TaskEnv(NamedTuple):
 
 
 def _order_keys(
-    data: dict[str, Any], first_keys: list[str], last_keys: Optional[list[str]] = None
+    data: dict[str, Any],
+    first_keys: list[str],
+    last_keys: Optional[list[str]] = None,
 ) -> ruamel.yaml.comments.CommentedMap:
     if last_keys is None:
         last_keys = []
@@ -232,7 +235,8 @@ def _upgrade_ubuntu(task_env: TaskEnv) -> None:
     del task_env
 
     for workflow_file in mra.run(
-        ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
+        ["git", "ls-files", ".github/workflows/*.yaml"],
+        stdout=subprocess.PIPE,
     ).stdout.split("\n"):
         if workflow_file:
             try:
@@ -393,17 +397,16 @@ def _update_main_workflow(task_env: TaskEnv) -> None:
                                             value or "\n\n",
                                             ruamel.yaml.error.CommentMark(0),
                                             None,
-                                        )
+                                        ),
                                     ],
                                     None,
                                 ]
-                        else:
-                            if step.get("run", "") == "c2cciutils-checks":
-                                if not task_env.gopass:
-                                    env = step.setdefault("env", {})
-                                    env["SNYK_TOKEN"] = (  # nosec
-                                        "${{ secrets.SNYK_TOKEN }}"
-                                    )
+                        elif step.get("run", "") == "c2cciutils-checks":
+                            if not task_env.gopass:
+                                env = step.setdefault("env", {})
+                                env["SNYK_TOKEN"] = (  # nosec
+                                    "${{ secrets.SNYK_TOKEN }}"
+                                )
 
             if not task_env.on_stabilization_branches or yaml.is_modified():
                 _canonicalize_workflow(yaml)
@@ -473,7 +476,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                         "mv",
                         file_,
                         ".github/workflows/pull-request-automation.yaml",
-                    ]
+                    ],
                 )
     if not os.path.exists(".github/workflows/pull-request-automation.yaml"):
         with mra.Edit(".github/workflows/pull-request-automation.yaml") as text:
@@ -504,7 +507,7 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                     "              event: 'APPROVE',",
                     "            })",
                     "    if: github.event.pull_request.user.login == 'renovate[bot]'",
-                ]
+                ],
             )
     with mra.EditYAML(".github/workflows/pull-request-automation.yaml") as yaml:
         task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
@@ -565,8 +568,8 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                         step["uses"] = "actions/github-script@v7"
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
-                            "\n".join(["console.log(context);"])
-                        )
+                            "console.log(context);",
+                        ),
                     }
                     if "if" in step:
                         del step["if"]
@@ -581,14 +584,14 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                                 "startsWith(github.head_ref, 'ghci/audit/')",
                                 safe_or(
                                     [
-                                        f"github.event.pull_request.user.login == 'geo-ghci-test[bot]'",
-                                        f"github.event.pull_request.user.login == 'geo-ghci-int[bot]'",
-                                        f"github.event.pull_request.user.login == 'geo-ghci[bot]'",
+                                        "github.event.pull_request.user.login == 'geo-ghci-test[bot]'",
+                                        "github.event.pull_request.user.login == 'geo-ghci-int[bot]'",
+                                        "github.event.pull_request.user.login == 'geo-ghci[bot]'",
                                     ],
                                     "  ",
                                 ),
-                            ]
-                        )
+                            ],
+                        ),
                     )
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
@@ -600,15 +603,15 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                                     "  pull_number: context.payload.pull_request.number,",
                                     "  event: 'APPROVE',",
                                     "})",
-                                ]
-                            )
-                        )
+                                ],
+                            ),
+                        ),
                     }
                 if step["name"] == AUTO_REVIEW_RENOVATE_UPDATES:
                     if not step.get("uses", "").startswith("actions/github-script@"):
                         step["uses"] = "actions/github-script@v7"
                     step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
-                        f"github.event.pull_request.user.login == 'renovate[bot]'",
+                        "github.event.pull_request.user.login == 'renovate[bot]'",
                     )
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
@@ -620,34 +623,10 @@ def _update_pull_request_automation_workflow(task_env: TaskEnv) -> None:
                                     "  pull_number: context.payload.pull_request.number,",
                                     "  event: 'APPROVE',",
                                     "})",
-                                ]
-                            )
-                        )
+                                ],
+                            ),
+                        ),
                     }
-                auto_review_merge_script = "\n".join(
-                    [
-                        "github.rest.pulls.createReview({",
-                        "  owner: context.repo.owner,",
-                        "  repo: context.repo.repo,",
-                        "  pull_number: context.payload.pull_request.number,",
-                        "  event: 'APPROVE',",
-                        "});",
-                        "github.graphql(`",
-                        "  mutation {",
-                        "    enablePullRequestAutoMerge(input: {",
-                        '      pullRequestId: "${context.payload.pull_request.node_id}",',
-                        "      mergeMethod: SQUASH,",
-                        "    }) {",
-                        "      pullRequest {",
-                        "        autoMergeRequest {",
-                        "          enabledAt",
-                        "        }",
-                        "      }",
-                        "    }",
-                        "  }",
-                        "`)",
-                    ]
-                )
 
         if not task_env.on_stabilization_branches or yaml.is_modified():
             _canonicalize_workflow(yaml)
@@ -696,7 +675,7 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                     exit_on_error=False,
                     stdout=subprocess.PIPE,
                     encoding="utf-8",
-                ).stdout.strip()
+                ).stdout.strip(),
             )
             > 0
         )
@@ -708,7 +687,8 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
             if os.path.exists(pyproject_filename):
                 with mra.EditTOML(pyproject_filename) as pyproject:
                     if "requires" in pyproject.get("build-system", {}) and "python" in pyproject.get(
-                        "tool", {}
+                        "tool",
+                        {},
                     ).get("poetry", {}).get("dependencies", {}):
                         classifiers = (
                             pyproject.setdefault("tool", {})
@@ -756,7 +736,8 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                         #                         requirements_txt.data += f"{plugin}=={plugin_version}\n"
 
                         poetry_dynamic_versioning = pyproject.setdefault("tool", {}).setdefault(
-                            "poetry-dynamic-versioning", {}
+                            "poetry-dynamic-versioning",
+                            {},
                         )
                         poetry_dynamic_versioning.setdefault("enable", True)
                         poetry_dynamic_versioning.setdefault("vcs", "git")
@@ -775,21 +756,24 @@ def _update_pyproject_toml(task_env: TaskEnv) -> None:
                                     "{{serialize_pep440(bump_version(base), dev=distance)}}",
                                     "{%- endif -%}",
                                     "",
-                                ]
+                                ],
                             ),
                             tomlkit.items.StringType.MLB,
                         )
                         poetry_plugin_tweak_dependencies_version = pyproject.setdefault(
-                            "tool", {}
+                            "tool",
+                            {},
                         ).setdefault("poetry-plugin-tweak-dependencies-version", {})
                         poetry_plugin_tweak_dependencies_version.setdefault("default", "present")
 
                         pyproject.setdefault("tool", {}).setdefault("ruff", {}).setdefault("line-length", 110)
                         pyproject.setdefault("tool", {}).setdefault("ruff", {}).setdefault(
-                            "target-version", "py310"
+                            "target-version",
+                            "py310",
                         )
                         pyproject["tool"]["ruff"].setdefault("lint", {}).setdefault(
-                            "pydocstyle", {}
+                            "pydocstyle",
+                            {},
                         ).setdefault("convention", "numpy")
                         for rm_tool in ("mypy", "black", "isort"):
                             if rm_tool in pyproject["tool"]:
@@ -808,12 +792,14 @@ def _update_prospector_config(task_env: TaskEnv) -> None:
         == 0
     )
     for bandit_filename in mra.run(
-        ["git", "ls-files", ".bandit.yaml"], stdout=subprocess.PIPE
+        ["git", "ls-files", ".bandit.yaml"],
+        stdout=subprocess.PIPE,
     ).stdout.splitlines():
         if os.path.exists(bandit_filename):
             os.remove(bandit_filename)
     for prospector_filename in mra.run(
-        ["git", "ls-files", ".prospector.yaml"], stdout=subprocess.PIPE
+        ["git", "ls-files", ".prospector.yaml"],
+        stdout=subprocess.PIPE,
     ).stdout.splitlines():
         with mra.EditYAML(prospector_filename) as prospector_config:
             if "bandit" in prospector_config:
@@ -914,7 +900,8 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
         renovate_config.remove_package_rule({}, ["Ungroup Python dependencies"])
         renovate_config.remove_regex_manager({}, ["Python version in actions/setup-python action"])
         renovate_config.remove_package_rule(
-            {}, ["In file `.python-version`, use the `<major>.<minor>` version"]
+            {},
+            ["In file `.python-version`, use the `<major>.<minor>` version"],
         )
 
         # json-schema
@@ -922,7 +909,8 @@ def _update_renovate_config(task_env: TaskEnv) -> None:
 
         # shellcheck
         renovate_config.remove_package_rule(
-            {}, ["Support the 4 parts of shellcheck-py version with a v prefix"]
+            {},
+            ["Support the 4 parts of shellcheck-py version with a v prefix"],
         )
 
         renovate_config.remove_package_rule({}, ["Update dpkg versions at any time"])
@@ -987,7 +975,8 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                 schemas += [
                     f
                     for f in mra.run(
-                        ["git", "ls-files", f"**/{files_}"], stdout=subprocess.PIPE
+                        ["git", "ls-files", f"**/{files_}"],
+                        stdout=subprocess.PIPE,
                     ).stdout.split("\n")
                     if f
                 ]
@@ -1062,7 +1051,9 @@ def _update_pre_commit_config(task_env: TaskEnv) -> None:
                     ]:
                         if deps.split("=")[0] not in current_deps:
                             pre_commit_config.add_commented_additional_dependencies(
-                                prospector_hook, [deps], "pypi"
+                                prospector_hook,
+                                [deps],
+                                "pypi",
                             )
                     pre_commit_config.repos_hooks["https://github.com/PyCQA/prospector"]["hooks"][
                         "prospector"
@@ -1167,14 +1158,11 @@ def _get_env() -> TaskEnv:
     if os.path.exists("ci/requirements.txt"):
         with mra.Edit("ci/requirements.txt") as requirements_txt:
             requirements = [
-                r
-                for r in requirements_txt.data.split("\n")
-                if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
+                r for r in requirements_txt.data.split("\n") if r.startswith(("c2cciutils==", "c2cciutils["))
             ]
             if len(requirements) == 1:
                 c2cciutils_version_string = requirements[0].split("==")[1]
-                if c2cciutils_version_string.endswith(".*"):
-                    c2cciutils_version_string = c2cciutils_version_string[:-2]
+                c2cciutils_version_string = c2cciutils_version_string.removesuffix(".*")
                 c2cciutils_version = version.parse(c2cciutils_version_string)
                 set_c2cciutils_version = True
     c2cciutils_version_config = config.value("c2cciutils_version")
@@ -1250,7 +1238,7 @@ def _ghci_updates(task_env: TaskEnv) -> None:
                 """# yaml-language-server: $schema=https://geoservices-int.camptocamp.com/github/schema.json
 
 profile: helm
-"""
+""",
             )
 
 

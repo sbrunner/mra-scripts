@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("--blue-green", "--bg", action="store_true", help="Use blue-green deployment.")
     parser.add_argument("--pod", type=int, default=2, help="Number of pods.")
     parser.add_argument(
-        "--strategy", default="RollingUpdate", help="Deployment strategy, can be RollingUpdate or Recreate."
+        "--strategy", default="RollingUpdate", help="Deployment strategy, can be RollingUpdate or Recreate.",
     )
     args = parser.parse_args()
 

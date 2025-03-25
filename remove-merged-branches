@@ -5,14 +5,7 @@ import random
 import re
 import subprocess
 
-import c2cciutils.security
 import multi_repo_automation as mra
-import requests
-import ruamel
-import toml
-import yaml
-from identify import identify
-from ruamel.yaml import YAML
 
 # if os.path.exists(".github/renovate.json5"):
 # if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
@@ -40,7 +33,8 @@ def _do() -> None:
 
     mra.run(["git", "fetch", "--all", "--prune"])
     original_branch = mra.run(
-        ["git", "rev-parse", "--abbrev-ref", "HEAD"], stdout=subprocess.PIPE
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        stdout=subprocess.PIPE,
     ).stdout.strip()
 
     try:
@@ -73,8 +67,7 @@ def _do() -> None:
 
         temp_branch = ""
         for branch in all_branches:
-            if branch.startswith("* "):
-                branch = branch[2:]
+            branch = branch.removeprefix("* ")
             if branch != "gh-pages" and branch not in stabilization_branches:
                 print(f"== Work on branch '{branch}'")
                 if branch.isdigit():
@@ -95,7 +88,7 @@ def _do() -> None:
                             ],
                             check=True,
                             stdout=subprocess.PIPE,
-                        ).stdout
+                        ).stdout,
                     )
                     print(f"== Branch {branch}, is {ahead_} ahead from {main_branch}.")
                     if ahead_ < ahead:
@@ -119,7 +112,7 @@ def _do() -> None:
                                 ],
                                 check=True,
                                 stdout=subprocess.PIPE,
-                            ).stdout
+                            ).stdout,
                         )
                         if behind_ < behind:
                             selected_main_branch = main_branch
@@ -138,11 +131,11 @@ def _do() -> None:
                         ],
                         check=True,
                         stdout=subprocess.PIPE,
-                    ).stdout
+                    ).stdout,
                 )
                 resume.append(
                     f"Branch {branch}, based on {selected_main_branch} "
-                    f"(with {behind} behind and {ahead} ahead commits)"
+                    f"(with {behind} behind and {ahead} ahead commits)",
                 )
 
                 if ahead == 0 and branch != original_branch:
@@ -173,7 +166,7 @@ def _do() -> None:
                             ],
                             check=True,
                             stdout=subprocess.PIPE,
-                        ).stdout
+                        ).stdout,
                     )
                     mra.run(["git", "checkout", original_branch])
                     if ahead == 0 and branch != original_branch:

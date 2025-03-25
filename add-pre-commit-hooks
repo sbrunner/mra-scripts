@@ -44,10 +44,12 @@ pre-commit install --allow-missing-config
     if os.path.exists(".github/renovate.json5"):
         with mra.EditRenovateConfig() as renovate_edit:
             renovate_edit.data = renovate_edit.data.replace(
-                "'^.pre-commit-config.yaml'", "'^.pre-commit-config.yaml$'"
+                "'^.pre-commit-config.yaml'",
+                "'^.pre-commit-config.yaml$'",
             )
             renovate_edit.data = renovate_edit.data.replace(
-                "'^.pre-commit-config.yaml$'", "'^.pre-commit-config\\\\.yaml$'"
+                "'^.pre-commit-config.yaml$'",
+                "'^.pre-commit-config\\\\.yaml$'",
             )
 
             renovate_edit.add("'pre-commit': { enabled: true },", "'pre-commit'")
@@ -89,7 +91,7 @@ ci:
   autoupdate_schedule: quarterly
 
 repos: []
-"""
+""",
             )
 
     with mra.Edit(".pre-commit-config.yaml") as config:
@@ -198,7 +200,8 @@ repos: []
                 {
                     "id": "poetry-check",
                     "additional_dependencies": pre_commit_config.commented_additional_dependencies(
-                        ["poetry==1.3.2"], "pypi"
+                        ["poetry==1.3.2"],
+                        "pypi",
                     ),
                 },
             )
@@ -252,7 +255,8 @@ repos: []
                 {
                     "id": "check-renovate",
                     "additional_dependencies": pre_commit_config.commented_additional_dependencies(
-                        ["pyjson5==1.6.2"], "pypi"
+                        ["pyjson5==1.6.2"],
+                        "pypi",
                     ),
                 },
             )

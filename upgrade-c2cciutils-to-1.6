@@ -85,7 +85,8 @@ def _do() -> None:
     is_helm = os.path.exists("Chart.yaml") or os.path.exists("test/helmchart/Chart.yaml")
 
     for workflow_file in mra.run(
-        ["git", "ls-files", ".github/workflows/*.yaml"], stdout=subprocess.PIPE
+        ["git", "ls-files", ".github/workflows/*.yaml"],
+        stdout=subprocess.PIPE,
     ).stdout.split("\n"):
         if workflow_file:
             with mra.EditYAML(workflow_file) as yaml:
@@ -117,7 +118,7 @@ def _do() -> None:
                                 {
                                     "GITHUB_TOKEN": token,
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
+                                },
                             )
                 if missing_git_config:
                     job["steps"].insert(
@@ -140,7 +141,7 @@ def _do() -> None:
         with mra.Edit("ci/config.yaml") as ci_config:
             data = ci_config.data.split("\n")
             if ci_config.data.startswith(
-                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils"
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/camptocamp/c2cciutils",
             ):
                 data = data[1:]
 
@@ -153,7 +154,7 @@ def _do() -> None:
                     requirement = [
                         r
                         for r in requirements_txt.data.split("\n")
-                        if r.startswith("c2cciutils==") or r.startswith("c2cciutils[")
+                        if r.startswith(("c2cciutils==", "c2cciutils["))
                     ]
                     if len(requirement) == 1:
                         c2cciutils_version_str = requirement[0].split("==")[1]
@@ -194,13 +195,7 @@ def _do() -> None:
                     {
                         "name": "Create release",
                         "run": ruamel.yaml.scalarstring.LiteralScalarString(
-                            "\n".join(
-                                [
-                                    "if [[ ${{ github.ref_name }} =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then",
-                                    "  gh release create ${{ github.ref_name }} --generate-notes || true",
-                                    "fi",
-                                ]
-                            )
+                            "if [[ ${{ github.ref_name }} =~ ^[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then\n  gh release create ${{ github.ref_name }} --generate-notes || true\nfi",
                         ),
                         "if": "github.event_name == 'push' && github.ref_type == 'tag'",
                         "env": mra_yaml.commented_map(
@@ -209,7 +204,7 @@ def _do() -> None:
                                     token,
                                     "\n\n",
                                 ],
-                            }
+                            },
                         ),
                     },
                 ]
@@ -247,7 +242,7 @@ def _do() -> None:
                             "--skip-from=dependabot[bot]",
                             "--skip-from=renovate[bot]",
                             "-v",
-                        ]
+                        ],
                     ),
                     "env": {
                         "AEON_AUTOMATION_GH_TOKEN": token,
@@ -275,7 +270,7 @@ def _do() -> None:
                                 {
                                     "DOCKERHUB_PASSWORD": "${{ secrets.DOCKER_PASSWORD }}",
                                     "DOCKERHUB_USERNAME": "${{ secrets.DOCKER_USERNAME }}",
-                                }
+                                },
                             )
 
     if os.path.exists(".github/workflows/delete-old-workflow-run.yaml"):
@@ -293,7 +288,7 @@ def _do() -> None:
                 "mv",
                 ".github/workflows/dependabot-auto-merge.yaml",
                 ".github/workflows/dependency-update-review.yaml",
-            ]
+            ],
         )
     if os.path.exists(".github/workflows/auto-review.yaml"):
         mra.run(
@@ -302,7 +297,7 @@ def _do() -> None:
                 "mv",
                 ".github/workflows/auto-review.yaml",
                 ".github/workflows/dependency-update-review.yaml",
-            ]
+            ],
         )
     if os.path.exists(".github/workflows/dependency-update-review.yaml"):
         with mra.EditYAML(".github/workflows/dependency-update-review.yaml") as yaml:
@@ -333,7 +328,7 @@ def _do() -> None:
                             {
                                 "GITHUB_EVENT": "${{ toJson(github) }}",
                                 "GITHUB_TOKEN": token,
-                            }
+                            },
                         )
 
     if os.path.exists(".github/workflows/backport.yaml"):
@@ -357,7 +352,7 @@ def _do() -> None:
                                 {
                                     "GITHUB_TOKEN": token,
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
+                                },
                             )
 
     if os.path.exists(".github/workflows/main.yaml"):
@@ -398,15 +393,14 @@ def _do() -> None:
                                         value or "\n\n",
                                         ruamel.yaml.error.CommentMark(0),
                                         None,
-                                    )
+                                    ),
                                 ],
                                 None,
                             ]
-                    else:
-                        if step.get("run", "") == "c2cciutils-checks":
-                            if not gopass:
-                                env = step.setdefault("env", {})
-                                env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
+                    elif step.get("run", "") == "c2cciutils-checks":
+                        if not gopass:
+                            env = step.setdefault("env", {})
+                            env["SNYK_TOKEN"] = "${{ secrets.SNYK_TOKEN }}"  # nosec
 
                     if "docker login" in step.get("run", ""):
                         has_docker_login = True
@@ -416,7 +410,7 @@ def _do() -> None:
                             step["run"] = ruamel.yaml.scalarstring.LiteralScalarString(
                                 """echo "[pypi]" > ~/.pypirc
 echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
-echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc""",
                             )
 
                     if "c2cciutils-publish" in step.get("run", ""):
@@ -426,7 +420,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                                 {
                                     "GITHUB_TOKEN": token,
                                     "SNYK_TOKEN": "${{ secrets.SNYK_TOKEN }}",
-                                }
+                                },
                             )
 
                 if (
@@ -448,9 +442,9 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                                     "run": ruamel.yaml.scalarstring.LiteralScalarString(
                                         """echo "[pypi]" > ~/.pypirc
 echo "username = ${{ secrets.PYPI_USERNAME }}" >> ~/.pypirc
-echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
+echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc""",
                                     ),
-                                }
+                                },
                             ]
                             + job["steps"][publish_index:]
                         )
@@ -465,8 +459,8 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                         job["steps"][:publish_index]
                         + [
                             {
-                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}"
-                            }
+                                "run": "docker login --username=${{ secrets.DOCKER_USERNAME }} --password=${{ secrets.DOCKER_PASSWORD }}",
+                            },
                         ]
                         + job["steps"][publish_index:]
                     )
@@ -477,7 +471,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                 "schedule: '.*'",
                 "schedule: 'after 5pm on the first day of the month'",
                 renovate_config.data,
-                1,
+                count=1,
             )
             renovate_config.data = re.sub(
                 re.escape("fileMatch: ['^.pre-commit-config.yaml$'],"),
@@ -491,7 +485,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
             )
             renovate_config.data = re.sub(
                 re.escape(
-                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',"
+                    "'.*https://raw\\\\\\\\.githubusercontent\\\\\\\\.com/(?<depName>[^\\\\\\\\s]+)/(?<currentValue>[0-9\\\\\\\\.]+)/.*',",
                 ),
                 r"'.*https://raw\\\\.githubusercontent\\\\.com/(?<depName>[^\\\\s]+)/(?<currentValue>[0-9\\\\.]+)/.*',",
                 renovate_config.data,
@@ -564,7 +558,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                         {
                             "fileMatch": [r"^.pre-commit-config\.yaml$"],
                             "matchStrings": [
-                                " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)"
+                                " +- '?(?<depName>[^' @=]+)(@|==)(?<currentValue>[^' @=]+)'? # (?<datasource>.+)",
                             ],
                         },
                         r"^.pre-commit-config\\.yaml$",
@@ -573,7 +567,7 @@ echo "password = ${{ secrets.PYPI_PASSWORD }}" >> ~/.pypirc"""
                         {
                             "fileMatch": [r"^ci/dpkg-versions\.yaml$"],
                             "matchStrings": [
-                                r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?"
+                                r" *(?<depName>[^'\s]+): '?(?<currentValue>[^'\s/]*[0-9][^'\s/]*)'?",
                             ],
                             "datasourceTemplate": "repology",
                             "versioningTemplate": "loose",
@@ -629,7 +623,7 @@ if (process.env.GITHUB_REF_TYPE == 'tag') {
         event_type: 'changelog',
     });
 }
-"""
+""",
             )
         mra.run(["chmod", "-x", ".github/run-changelog.mjs"])
         mra.run(["git", "add", ".github/run-changelog.mjs"])
@@ -661,7 +655,7 @@ if (process.env.GITHUB_REF_TYPE == 'tag') {
                         "env": {
                             "GITHUB_TOKEN": "${{ secrets.GITHUB_TOKEN }}",
                         },
-                    }
+                    },
                 )
                 steps.ca.items[len(steps) - 2] = [
                     None,
