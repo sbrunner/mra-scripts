@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3  # pylint: disable=invalid-name
 
 # TODO:  # noqa: TD005, RUF100
 # add  $schema: 'https://docs.renovatebot.com/renovate-schema.json', in renovate configuration
