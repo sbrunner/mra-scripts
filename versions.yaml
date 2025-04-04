@@ -19,4 +19,4 @@ actions/cache: v4.2.3 # github-tags
 actions/upload-artifact: v4.6.2 # github-tags
 actions/download-artifact: v4.2.1 # github-tags
 actions/setup-python: v5.5.0 # github-tags
-sbrunner/hooks: 1.4.0 # github-tags
+sbrunner/hooks: 1.4.1 # github-tags
