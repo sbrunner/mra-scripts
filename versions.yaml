@@ -12,7 +12,7 @@ tag-publish: 1.0.1 # pypi
 sbrunner/jsonschema-gentypes: 2.10.0 # github-tags
 poetry-dynamic-versioning: 1.8.2 # pypi
 poetry-plugin-tweak-dependencies-version: 1.5.2 # pypi
-poetry-plugin-drop-python-upper-constraint: 0.1.0 # pypi
+poetry-plugin-drop-python-upper-constraint: 1.0.0 # pypi
 poetry-plugin-export: 1.9.0 # pypi
 sbrunner/jsonschema-validator: 1.0.0 # github-tags
 actions/cache: v4.2.3 # github-tags
