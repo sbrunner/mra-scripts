@@ -6,7 +6,7 @@ astral-sh/ruff-pre-commit: v0.11.2 # github-tags
 PyCQA/prospector: v1.16.1 # github-tags
 prospector-profile-duplicated: 1.10.5 # pypi
 prospector-profile-utils: 1.22.3 # pypi
-ruff: 0.11.2 # pypi
+ruff: 0.11.7 # pypi
 sbrunner/python-versions-hook: 0.8.0 # github-tags
 tag-publish: 1.0.1 # pypi
 sbrunner/jsonschema-gentypes: 2.10.0 # github-tags
