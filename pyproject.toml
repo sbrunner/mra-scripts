@@ -35,7 +35,7 @@ classifiers = [
 python = ">=3.9,<4.0"
 multi-repo-automation = "1.7.0"
 ruamel-yaml = "0.18.10"
-githubkit = "0.12.9"
+githubkit = "0.12.12"
 
 [tool.poetry.group.dev.dependencies]
 # pylint = "2.15.6"
