@@ -1,24 +1,17 @@
-#!/usr/bin/env python3  # pylint: disable=invalid-name
+#!/usr/bin/env python3
+# pylint: disable=invalid-name
 
-# TODO:  # noqa: TD005, RUF100
-# add  $schema: 'https://docs.renovatebot.com/renovate-schema.json', in renovate configuration
-# https://github.com/tox-dev/pyproject-fmt
+# TODO:  # noqa: TD005, RUF100, TD003
 #
-# Warning: [tool.poetry.name] is deprecated. Use [project.name] instead.
-# Warning: [tool.poetry.version] is set but 'version' is not in [project.dynamic]. If it is static use [project.version]. If it is dynamic, add 'version' to [project.dynamic].
-# If you want to set the version dynamically via `poetry build --local-version` or you are using a plugin, which sets the version dynamically, you should define the version in [tool.poetry] and add 'version' to [project.dynamic].
-# Warning: [tool.poetry.description] is deprecated. Use [project.description] instead.
-# Warning: [tool.poetry.readme] is set but 'readme' is not in [project.dynamic]. If it is static use [project.readme]. If it is dynamic, add 'readme' to [project.dynamic].
-# If you want to define multiple readmes, you should define them in [tool.poetry] and add 'readme' to [project.dynamic].
-# Warning: [tool.poetry.license] is deprecated. Use [project.license] instead.
-# Warning: [tool.poetry.authors] is deprecated. Use [project.authors] instead.
-# Warning: [tool.poetry.keywords] is deprecated. Use [project.keywords] instead.
-# Warning: [tool.poetry.classifiers] is set but 'classifiers' is not in [project.dynamic]. If it is static use [project.classifiers]. If it is dynamic, add 'classifiers' to [project.dynamic].
-# ATTENTION: Per default Poetry determines classifiers for supported Python versions and license automatically. If you define classifiers in [project], you disable the automatic enrichment. In other words, you have to define all classifiers manually. If you want to use Poetry's automatic enrichment of classifiers, you should define them in [tool.poetry] and add 'classifiers' to [project.dynamic].
-# Warning: [tool.poetry.homepage] is deprecated. Use [project.urls] instead.
-# Warning: [tool.poetry.repository] is deprecated. Use [project.urls] instead.
 # Warning: [tool.poetry.extras] is deprecated. Use [project.optional-dependencies] instead.
-# Warning: Defining console scripts in [tool.poetry.scripts] is deprecated. Use [project.scripts] instead. ([tool.poetry.scripts] should only be used for scripts of type 'file').
+#
+# [tool.poetry.extras]
+# debug_images = ["opencv-python-headless", "matplotlib"]
+#
+# [project.optional-dependencies]
+# debug_images = ["opencv-python-headless>=1.2.3", "matplotlib>=4.5.6"]
+#
+# remove poetry-plugin-remove-python-upper-bounds, strategy ?
 
 import functools
 import os
@@ -122,6 +115,7 @@ class _TaskEnv(NamedTuple):
     stabilization_branches: list[str]
     gopass: bool
     token: str
+    publish: bool
     config: _Config
 
 
@@ -263,11 +257,15 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tag_publish_config(task_env: _TaskEnv) -> None:
-    del task_env  # unused
-    if not mra.git_grep("tag-publish") and not mra.git_grep("c2cciutils-publish"):
-        if Path(".github/publish.yaml").exists():
-            Path(".github/publish.yaml").unlink()
+    if not task_env.publish:
         return
+
+    if (
+        not mra.git_grep("tag-publish")
+        and not mra.git_grep("c2cciutils-publish")
+        and Path(".github/publish.yaml").exists()
+    ):
+        Path(".github/publish.yaml").unlink()
 
     if Path(".github/publish.yaml").exists():
         return
@@ -541,7 +539,7 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
         with mra.EditYAML(Path(".github/workflows/main.yaml")) as yaml:
             _update_workflow_venv(task_env, yaml)
 
-            if mra.git_grep("tag-publish") or mra.git_grep("c2cciutils-publish"):
+            if task_env.publish:
                 permissions = yaml.setdefault("permissions", {})
                 permissions["contents"] = "write"
                 if task_env.use_docker:
@@ -562,7 +560,7 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
                         pre_commit_index = index
                     if step.get("run", "").startswith("c2cciutils-publish"):
                         publish_index = index
-                    if step.get("run", "").startswith("tag-publish"):
+                    if task_env.publish and step.get("run", "").startswith("tag-publish"):
                         tag_publish_index = index
                     if (
                         step.get("uses", "").startswith("actions/upload-artifact@")
@@ -769,15 +767,16 @@ def _clean_update_workflow(task_env: _TaskEnv) -> None:
         Path(".github/workflows/pr-checks.yaml").unlink()
     if Path(".github/workflows/test_url.yaml").exists():
         Path(".github/workflows/test_url.yaml").unlink()
+    if Path(".github/workflows/delete-old-workflow-run.yaml").exists():
+        Path(".github/workflows/delete-old-workflow-run.yaml").unlink()
+    if Path(".github/workflows/delete-old-workflows-run.yaml").exists():
+        Path(".github/workflows/delete-old-workflows-run.yaml").unlink()
+    if Path(".github/workflows/backport.yaml").exists():
+        Path(".github/workflows/backport.yaml").unlink()
+    if Path(".github/workflows/clean.yaml").exists():
+        Path(".github/workflows/clean.yaml").unlink()
 
     if not task_env.use_docker:
-        if Path(".github/workflows/clean.yaml").exists():
-            Path(".github/workflows/clean.yaml").unlink()
-        return
-
-    if not task_env.has_stabilization_branches:
-        if Path(".github/workflows/backport.yaml").exists():
-            Path(".github/workflows/backport.yaml").unlink()
         return
 
     # Upgrade deprecated workflows
@@ -794,14 +793,6 @@ def _clean_update_workflow(task_env: _TaskEnv) -> None:
                         if step.get("uses", "").startswith(f"{action}@{version_}"):
                             step["uses"] = f"{action}@{_VERSIONS[action]}"
                             break
-
-
-def _update_delete_old_workflows_run_workflow(task_env: _TaskEnv) -> None:
-    del task_env  # unused
-    if Path(".github/workflows/delete-old-workflow-run.yaml").exists():
-        Path(".github/workflows/delete-old-workflow-run.yaml").unlink()
-    if Path(".github/workflows/delete-old-workflows-run.yaml").exists():
-        Path(".github/workflows/delete-old-workflows-run.yaml").unlink()
 
 
 def _safe_or(elements: list[str], prefix: str = "") -> str:
@@ -1015,6 +1006,12 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                     if line.startswith("poetry=="):
                         poetry_version = version.parse(line.split("==")[1])
                         break
+                # Remove rependency poetry-plugin-drop-python-upper-constraint
+                requirements_txt.data = "\n".join(
+                    line
+                    for line in requirements_txt.data.splitlines()
+                    if not line.startswith("poetry-plugin-drop-python-upper-constraint==")
+                )
 
     if poetry_version >= version.parse("1.3.0"):
         typed = (
@@ -1035,19 +1032,15 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
         ):
             if pyproject_filename.exists():
                 with mra.EditTOML(pyproject_filename) as pyproject:
+                    if "project" not in pyproject:
+                        classifiers = pyproject.setdefault("project", {}).setdefault("classifiers", [])
+                        if typed and "Typing :: Typed" not in classifiers:
+                            classifiers.append("Typing :: Typed")
+                        pyproject["project"]["classifiers"] = sorted(classifiers)
                     if "requires" in pyproject.get("build-system", {}) and "python" in pyproject.get(
                         "tool",
                         {},
                     ).get("poetry", {}).get("dependencies", {}):
-                        classifiers = (
-                            pyproject.setdefault("tool", {})
-                            .setdefault("poetry", {})
-                            .setdefault("classifiers", [])
-                        )
-                        if typed and "Typing :: Typed" not in classifiers:
-                            classifiers.append("Typing :: Typed")
-                        pyproject["tool"]["poetry"]["classifiers"] = sorted(classifiers)
-
                         if "dev-dependencies" in pyproject["tool"]["poetry"]:
                             if "dependencies" in pyproject["tool"]["poetry"].setdefault(
                                 "group",
@@ -1109,6 +1102,14 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                         #                         and f"{plugin}[" not in requirements_txt.data
                         #                     ):
                         #                         requirements_txt.data += f"{plugin}=={plugin_version}\n"
+
+                        if "poetry-plugin-drop-python-upper-constraint" in pyproject.get(
+                            "build-system",
+                            {},
+                        ).get("requires", []):
+                            pyproject["build-system"]["requires"].remove(
+                                "poetry-plugin-drop-python-upper-constraint",
+                            )
 
                         poetry_dynamic_versioning = pyproject.setdefault("tool", {}).setdefault(
                             "poetry-dynamic-versioning",
@@ -1187,6 +1188,52 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                             )
                         )
 
+                    ### Upgrade for Poetry 2.0 ###
+                    if "project" not in pyproject:
+                        pyproject["project"] = {}
+
+                    pyproject["project"]["dynamic"] = ["dependencies", "version"]
+                    # Properties to move
+                    for prop in ("name", "description", "readme", "keywords", "license", "classifiers"):
+                        if pyproject.get("tool").get("poetry").get(prop):
+                            pyproject["project"][prop] = pyproject["tool"]["poetry"].pop(prop)
+                    # Email properties
+                    email_re = re.compile(r"(.*) <(.*)>")
+                    for prop in ("authors", "maintainers"):
+                        for email in pyproject.get("tool").get("poetry").pop(prop, []):
+                            email_match = email_re.match(email)
+                            assert email_match
+                            pyproject["project"].setdefault(prop, []).append(
+                                {
+                                    "name": email_match.group(1),
+                                    "email": email_match.group(2),
+                                },
+                            )
+                    # Urls
+                    repo_url = pyproject["tool"]["poetry"].get("homepage")
+                    if pyproject["tool"]["poetry"].get("homepage") and not pyproject["tool"]["poetry"].get(
+                        "homepage",
+                    ).startswith("https://github.com/"):
+                        pyproject["project"].setdefault("urls", {})["homepage"] = pyproject["tool"][
+                            "poetry"
+                        ].pop("homepage")
+                    if "homepage" in pyproject["tool"]["poetry"]:
+                        del pyproject["tool"]["poetry"]["homepage"]
+                    if "repository" in pyproject["tool"]["poetry"]:
+                        repo_url = pyproject["tool"]["poetry"].pop("repository")
+                    if repo_url:
+                        pyproject["project"].setdefault("urls", {})["repository"] = repo_url
+                        pyproject["project"].setdefault("urls", {})["Bug Tracker"] = f"{repo_url}/issues"
+                    # Scripts
+                    if "scripts" in pyproject["tool"]["poetry"]:
+                        pyproject["project"]["scripts"] = pyproject["tool"]["poetry"].pop("scripts")
+                    # Packages
+                    if "packages" in pyproject["tool"]["poetry"]:
+                        pyproject["project"]["packages"] = pyproject["tool"]["poetry"].pop("packages")
+                    # Include
+                    if "include" in pyproject["tool"]["poetry"]:
+                        pyproject["project"]["include"] = pyproject["tool"]["poetry"].pop("include")
+
 
 def _update_prospector_config(task_env: _TaskEnv) -> None:
     del task_env  # unused
@@ -1221,7 +1268,7 @@ def _update_prospector_config(task_env: _TaskEnv) -> None:
                 *(["utils:c2cwsgiutils"] if use_c2cwsgiutils else []),
             ):
                 if inherit not in prospector_config.get("inherits", []):
-                    prospector_config["inherits"].append(inherit)
+                    prospector_config.setdefault("inherits", []).append(inherit)
 
             # remove utils:unsafe from inherits
             for inherit in prospector_config.get("inherits", []):
@@ -1239,7 +1286,7 @@ def _update_prospector_config(task_env: _TaskEnv) -> None:
                 "mypy",
                 "mccabe",
             ):
-                if "run" in prospector_config.get(tag, {}):
+                if prospector_config.get(tag, {}).get("run", False):
                     del prospector_config[tag]["run"]
                     if not prospector_config[tag]:
                         del prospector_config[tag]
@@ -1406,11 +1453,13 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
         renovate_config.remove_package_rule({}, ["Group the dev dependency update"])
         renovate_config.remove_package_rule({}, ["Auto merge the dev dependency update"])
         renovate_config.remove_package_rule({}, ["Group and auto merge the CI dependencies"])
+        renovate_config.remove_regex_manager({}, ["Group and auto merge the GitHub action"])
 
         # pre-commit
         if "pre-commit" in renovate_config:
             del renovate_config["pre-commit"]
         renovate_config.remove_regex_manager({}, ["Do updates on pre-commit additional dependencies"])
+        renovate_config.remove_regex_manager({}, ["Group and auto merge the pre-commit updates"])
 
         # python
         renovate_config.remove_package_rule({}, ["Ungroup Python dependencies"])
@@ -1531,7 +1580,7 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                             if line:
                                 filename = line.split(":")[0]
                                 if filename.endswith(".yaml"):
-                                    filenames |= {filename}
+                                    filenames |= {Path(filename)}
                     for filename in filenames:
                         filename_re = re.escape(str(filename))
                         if filename.exists():
@@ -1681,7 +1730,8 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                         for deps in [
                             "prospector-profile-duplicated==" + _VERSIONS["prospector-profile-duplicated"],
                             "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
-                            # "ruff==" + _VERSIONS["ruff"],
+                            "pylint[spelling]==" + _VERSIONS["pylint"],
+                            "ruff==" + _VERSIONS["ruff"],
                         ]:
                             if deps.split("=")[0] not in current_deps:
                                 pre_commit_config.add_commented_additional_dependencies(
@@ -1707,7 +1757,7 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                                 prospector_hooks[1],
                                 [
                                     "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
-                                    # "ruff==" + _VERSIONS["ruff"],
+                                    "ruff==" + _VERSIONS["ruff"],
                                 ],
                                 "pypi",
                             )
@@ -1751,7 +1801,8 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
 
 
 def _use_tag_publish(task_env: _TaskEnv) -> None:
-    del task_env  # unused
+    if not task_env.publish:
+        return
     if not Path(".github/workflows/main.yaml").exists():
         return
 
@@ -1809,7 +1860,7 @@ def _use_tag_publish(task_env: _TaskEnv) -> None:
                         else:
                             requirements_lines[c2cciutils_index] = "c2cciutils==" + c2cciutils_version
 
-                    if "tag-publish" not in requirements_txt.data:
+                    if task_env.publish and "tag-publish" not in requirements_txt.data:
                         requirements_lines.append(f"tag-publish=={_VERSIONS['tag-publish']}")
                     requirements_txt.data = "\n".join(requirements_lines) + "\n"
 
@@ -1955,6 +2006,7 @@ def _get_env() -> _TaskEnv:
         stabilization_branches,
         gopass,
         token,
+        config.enabled("publish", mra.git_grep("tag-publish") or mra.git_grep("c2cciutils-publish")),
         config,
     )
 
@@ -1988,11 +2040,7 @@ def _do() -> None:
         if task_env.config.enabled(name, default=True):
             task(task_env)
     if task_env.on_stabilization_branches:
-        for file_ in (
-            Path(".github/workflows/delete-old-workflow-run.yaml"),
-            Path(".github/workflows/delete-old-workflows-run.yaml"),
-            Path(".github/renovate.json5"),
-        ):
+        for file_ in (Path(".github/renovate.json5"),):
             if file_.exists():
                 file_.unlink()
         for file_ in Path(".github/workflows").glob("audit*.yaml"):
@@ -2007,10 +2055,6 @@ def _do() -> None:
             ("update-clean-workflow", _update_clean_workflow),
             ("tag-publish-config", _tag_publish_config),
             ("update-audit-workflow", _update_audit_workflow),
-            (
-                "update-delete-old-workflow-run-workflow",
-                _update_delete_old_workflows_run_workflow,
-            ),
             ("update-pyproject-toml", _update_pyproject_toml),
             ("update-prospector-config", _update_prospector_config),
             # ("update-python-version", _update_python_version),
@@ -2030,7 +2074,6 @@ def _do() -> None:
 
 if __name__ == "__main__":
     os.environ["IGNORE_CONFIG_ERROR"] = "true"
-
     mra.main(
         _do,
         # pull_request_on_stabilization_branches

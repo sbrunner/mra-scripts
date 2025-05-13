@@ -348,7 +348,7 @@ repos: []
         )
 
 
-def add_arguments(args_parser):
+def _add_arguments(args_parser):
     args_parser = args_parser.add_argument_group("pre-commit", "Parameters related to the pre-commit.")
     args_parser.add_argument(
         "--no-repo",
@@ -375,5 +375,5 @@ if __name__ == "__main__":
             "pull_request_body": "This is done by the automated script named " + __file__,
             "branch": "pre-commit",
         },
-        add_arguments=add_arguments,
+        add_arguments=_add_arguments,
     )
