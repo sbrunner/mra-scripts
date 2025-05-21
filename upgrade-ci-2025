@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
 # pylint: disable=invalid-name
 
-# TODO:  # noqa: TD005, RUF100, TD003
-#
-# Warning: [tool.poetry.extras] is deprecated. Use [project.optional-dependencies] instead.
-#
-# [tool.poetry.extras]
-# debug_images = ["opencv-python-headless", "matplotlib"]
-#
-# [project.optional-dependencies]
-# debug_images = ["opencv-python-headless>=1.2.3", "matplotlib>=4.5.6"]
-#
-# remove poetry-plugin-remove-python-upper-bounds, strategy ?
+# T-O-D-O
+
 
 import functools
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Optional
 
 import multi_repo_automation as mra
 import ruamel.yaml.comments
@@ -98,25 +89,244 @@ class _Config:
         return default
 
 
-class _TaskEnv(NamedTuple):
-    github: GitHub
-    c2cciutils_version: version.Version
-    set_c2cciutils_version: bool
-    use_python: bool
-    # min_python_version: str
-    # max_python_version: str
-    pyproject_path: str
-    prospector_path: str
-    use_pypi: bool
-    use_docker: bool
-    use_helm: bool
-    has_stabilization_branches: bool
-    on_stabilization_branches: bool
-    stabilization_branches: list[str]
-    gopass: bool
-    token: str
-    publish: bool
-    config: _Config
+class _TaskEnv:
+    def __init__(self) -> None:
+        self.config = _Config()
+
+        # Get the version of c2cciutils
+        self.c2cciutils_version = version.parse("1.6.0")
+        self.set_c2cciutils_version = False
+        requirements = Path(".github/requirements.txt")
+        requirements = requirements if requirements.exists() else Path("ci/requirements.txt")
+        if requirements.exists():
+            with mra.Edit(requirements) as requirements_txt:
+                requirements = [
+                    r
+                    for r in requirements_txt.data.split("\n")
+                    if r.startswith(("c2cciutils==", "c2cciutils["))
+                ]
+                if len(requirements) == 1:
+                    c2cciutils_version_string = requirements[0].split("==")[1]
+                    c2cciutils_version_string = c2cciutils_version_string.removesuffix(".*")
+                    self.c2cciutils_version = version.parse(c2cciutils_version_string)
+                    self.set_c2cciutils_version = True
+        c2cciutils_version_config = self.config.value("c2cciutils_version")
+        if c2cciutils_version_config:
+            if c2cciutils_version_config == "master":
+                self.c2cciutils_version = version.parse("1.6.0")
+                self.set_c2cciutils_version = False
+            else:
+                self.c2cciutils_version = version.parse(c2cciutils_version_config)
+                self.set_c2cciutils_version = True
+
+    @property
+    def github(self) -> GitHub:
+        return GitHub(_TOKEN)
+
+    @property
+    def use_python(self) -> bool:
+        use_python = False
+        pyproject_path = self.pyproject_path
+        if pyproject_path:
+            with mra.EditTOML(pyproject_path) as pyproject:
+                use_python = "project" in pyproject or "build-system" in pyproject
+
+        return self.config.enabled("python", use_python)
+
+    @property
+    def pyproject_path(self) -> str:
+        pyproject_path = None
+
+        for pyproject_filename in (
+            Path("pyproject.toml"),
+            Path("app/pyproject.toml"),
+            Path("api/pyproject.toml"),
+            Path("docker/pyproject.toml"),
+        ):
+            if pyproject_filename.exists():
+                pyproject_path = pyproject_filename
+
+        return self.config.value("pyproject_path", pyproject_path)
+
+    @property
+    def prospector_path(self) -> str:
+        prospector_candidate_path = [
+            Path(".prospector.yaml"),
+            Path("app/.prospector.yaml"),
+            Path("api/.prospector.yaml"),
+            Path("docker/.prospector.yaml"),
+        ]
+        prospector_path = None
+        for prospector_path_candidate in prospector_candidate_path:
+            if prospector_path_candidate.exists():
+                prospector_path = prospector_path_candidate
+                break
+        return self.config.value("prospector_path", prospector_path)
+
+    @property
+    def use_pypi(self) -> bool:
+        return self.config.enabled(
+            "pypi",
+            self.use_python and "no-pypi" not in self.config.repo.get("type", []),
+        )
+
+    @property
+    def use_docker(self) -> bool:
+        return self.config.enabled(
+            "docker",
+            (
+                Path("Dockerfile").exists()
+                or Path("app/Dockerfile").exists()
+                or Path("api/Dockerfile").exists()
+            )
+            and "no-docker" not in self.config.repo.get("type", []),
+        )
+
+    @property
+    def use_helm(self) -> bool:
+        return self.config.enabled(
+            "helm",
+            Path("Chart.yaml").exists() or Path("test/helmchart/Chart.yaml").exists(),
+        )
+
+    @property
+    def has_toml_files(self) -> bool:
+        return self.config.enabled(
+            "toml",
+            bool(
+                subprocess.run(
+                    ["git", "ls-files", "*.toml"],
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout,
+            ),
+        )
+
+    @property
+    def has_docker_files(self) -> bool:
+        return self.config.enabled(
+            "docker",
+            bool(
+                subprocess.run(
+                    ["git", "ls-files", "*/Dockerfile*", "Dockerfile*"],
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout,
+            ),
+        )
+
+    @property
+    def has_setup_py(self) -> bool:
+        return self.config.enabled(
+            "setup.py",
+            bool(
+                subprocess.run(
+                    ["git", "ls-files", "setup.py", "*/setup.py"],
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout,
+            ),
+        )
+
+    @property
+    def has_pyproject_toml(self) -> bool:
+        return self.config.enabled(
+            "pyproject.toml",
+            bool(
+                subprocess.run(
+                    ["git", "ls-files", "pyproject.toml", "*/pyproject.toml"],
+                    stdout=subprocess.PIPE,
+                    check=True,
+                ).stdout,
+            ),
+        )
+
+    @property
+    def has_python_package(self) -> bool:
+        """
+        Check if the repository has a Python package.
+
+        A Python package is defined by the presence of a setup.py or pyproject.toml file.
+        """
+        return self.config.enabled(
+            "python_package",
+            self.has_setup_py or self.has_pyproject_toml,
+        )
+
+    @property
+    def has_stabilization_branches(self) -> bool:
+        return self.config.arguments.on_stabilization_branches or len(self.stabilization_branches) > 0
+
+    @property
+    def on_stabilization_branches(self) -> bool:
+        return self.config.arguments.on_stabilization_branches and len(self.stabilization_branches) > 0
+
+    @property
+    def stabilization_branches(self) -> list[str]:
+        return mra.get_stabilization_branches(self.config.repo)
+
+    @property
+    def gopass(self) -> bool:
+        return self.config.enabled(
+            "gopass",
+            "no-gopass" not in self.config.repo.get("types", [])
+            and (
+                self.config.repo["name"].startswith("camptocamp/")
+                or self.config.repo["name"].startswith("mapfish/")
+            ),
+        )
+
+    @property
+    def token(self) -> str:
+        return self.config.value(
+            "github_token_secret",
+            "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if self.gopass else "${{ secrets.TOKEN }}",
+        )
+
+    @property
+    def publish(self) -> bool:
+        return self.config.enabled(
+            "publish",
+            mra.git_grep("tag-publish") or mra.git_grep("c2cciutils-publish"),
+        )
+
+    @property
+    def poetry_version(self) -> version.Version:
+        poetry_version = None
+        for requirements_path in (
+            Path("requirements.txt"),
+            Path(".github/requirements.txt"),
+            Path("ci/requirements.txt"),
+        ):
+            if requirements_path.exists():
+                with mra.Edit(requirements_path) as requirements_txt:
+                    for line in requirements_txt.data.splitlines():
+                        if line.startswith("poetry=="):
+                            poetry_version = version.parse(line.split("==")[1])
+                            break
+
+        if poetry_version is None:
+            poetry_version_str = self.config.value("poetry_version")
+            if poetry_version_str:
+                poetry_version = version.parse(poetry_version_str)
+            else:
+                poetry_version = version.parse(_VERSIONS["poetry"])
+        return poetry_version
+
+    @property
+    def python_versions_hook_version(self) -> version.Version:
+        pre_commit_config_path = Path(".pre-commit-config.yaml")
+        if pre_commit_config_path.exists():
+            with pre_commit_config_path.open(encoding="utf-8") as pre_commit_config_file:
+                pre_commit_config = py_yaml.load(pre_commit_config_file, Loader=py_yaml.SafeLoader)
+                for repo in pre_commit_config.get("repos", []):
+                    if repo.get("repo", "") == "https://github.com/sbrunner/python-versions-hook":
+                        return version.parse(repo["rev"])
+
+        python_versions_hook_version_str = self.config.value("python_versions_hook_version")
+        if python_versions_hook_version_str:
+            return version.parse(python_versions_hook_version_str)
+        return version.parse("0.0.0")
 
 
 def _create_labels(task_env: _TaskEnv) -> None:
@@ -192,7 +402,7 @@ def _get_master_branch(task_env: _TaskEnv, repo: list[str]) -> tuple[str, bool]:
     return master_branch, success
 
 
-def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
+def _get_c2cciutils_1_8_config(config: dict[str, Any], task_env: _TaskEnv) -> dict[str, Any]:
     """
     Get the configuration, with project and auto detections.
     """
@@ -215,27 +425,6 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
     #    config,
     # )
 
-    has_docker_files = bool(
-        subprocess.run(
-            ["git", "ls-files", "*/Dockerfile*", "Dockerfile*"],
-            stdout=subprocess.PIPE,
-            check=True,
-        ).stdout,
-    )
-    has_python_package = bool(
-        subprocess.run(
-            ["git", "ls-files", "setup.py", "*/setup.py"],
-            stdout=subprocess.PIPE,
-            check=True,
-        ).stdout,
-    ) or bool(
-        subprocess.run(
-            ["git", "ls-files", "pyproject.toml", "*/pyproject.toml"],
-            stdout=subprocess.PIPE,
-            check=True,
-        ).stdout,
-    )
-
     publish_config = _merge(
         {
             "pypi": {"versions": ["version_tag"], "packages": "<auto-detected>"},
@@ -244,8 +433,8 @@ def _get_c2cciutils_1_8_config(config: dict[str, Any]) -> dict[str, Any]:
         },
         {},
     )
-    publish_config["pypi"]["packages"] = [{"path": "."}] if has_python_package else []
-    publish_config["docker"]["images"] = [{"name": _get_repository()}] if has_docker_files else []
+    publish_config["pypi"]["packages"] = [{"path": "."}] if task_env.has_python_package else []
+    publish_config["docker"]["images"] = [{"name": _get_repository()}] if task_env.has_docker_files else []
     publish_config["helm"]["folders"] = [f.parent for f in Path().rglob("Chart.yaml")]
 
     default_config = {
@@ -272,10 +461,10 @@ def _tag_publish_config(task_env: _TaskEnv) -> None:
 
     ci_config = Path("ci/config.yaml")
     if not ci_config.exists():
-        filled_config = _get_c2cciutils_1_8_config({})
+        filled_config = _get_c2cciutils_1_8_config({}, task_env)
     else:
         with mra.EditYAML(ci_config) as config:
-            filled_config = _get_c2cciutils_1_8_config(config)
+            filled_config = _get_c2cciutils_1_8_config(config, task_env)
 
     if "publish" not in filled_config:
         return
@@ -752,11 +941,38 @@ def _update_clean_workflow(task_env: _TaskEnv) -> None:
             _update_workflow_venv(task_env, yaml)
 
 
-def _clean_update_workflow(task_env: _TaskEnv) -> None:
+def _upgrade_deprecated_action(task_env: _TaskEnv) -> None:
+    del task_env  # unused
+    # Upgrade deprecated workflows
+    for workflow_filename in Path(".github/workflows").glob("*.yaml"):
+        print(f"Upgrade {workflow_filename}")
+        with mra.EditYAML(workflow_filename) as yaml:
+            for job in yaml["jobs"].values():
+                print(f"Upgrade {job['name']}")
+                print(job.get("runs-on", ""))
+                if job.get("runs-on", "") == "ubuntu-20.04":
+                    job["runs-on"] = "ubuntu-22.04"
+                for step in job["steps"]:
+                    for action, old_version in [
+                        ("actions/cache", "v1"),
+                        ("actions/cache", "v2"),
+                        ("actions/upload-artifact", "v1"),
+                        ("actions/upload-artifact", "v2"),
+                        ("actions/upload-artifact", "v3"),
+                        ("actions/download-artifact", "v1"),
+                        ("actions/download-artifact", "v2"),
+                        ("actions/download-artifact", "v3"),
+                    ]:
+                        if step.get("uses", "").startswith(f"{action}@{old_version}"):
+                            new_version = _VERSIONS[action]
+                            new_version = new_version.split(".")[0]
+                            step["uses"] = f"{action}@{new_version}"
+                            break
+
+
+def _clean_workflow(task_env: _TaskEnv) -> None:
     if Path(".whitesource").exists():
         Path(".whitesource").unlink()
-    if Path(".pylintrc").exists():
-        Path(".pylintrc").unlink()
     if Path(".github/changelog-config.yaml").exists():
         Path(".github/changelog-config.yaml").unlink()
     if Path(".github/workflows/changelog.yaml").exists():
@@ -775,24 +991,8 @@ def _clean_update_workflow(task_env: _TaskEnv) -> None:
         Path(".github/workflows/backport.yaml").unlink()
     if Path(".github/workflows/clean.yaml").exists():
         Path(".github/workflows/clean.yaml").unlink()
-
-    if not task_env.use_docker:
-        return
-
-    # Upgrade deprecated workflows
-    for workflow_filename in Path(".github/workflows").glob("*.yaml"):
-        with mra.EditYAML(workflow_filename) as yaml:
-            for job in yaml["jobs"].values():
-                for step in job["steps"]:
-                    for action, version_ in [
-                        ("actions/cache", "v1"),
-                        ("actions/cache", "v2"),
-                        ("actions/upload-artifact", "v3"),
-                        ("actions/download-artifact", "v3"),
-                    ]:
-                        if step.get("uses", "").startswith(f"{action}@{version_}"):
-                            step["uses"] = f"{action}@{_VERSIONS[action]}"
-                            break
+    if not task_env.on_stabilization_branches and Path(".pylintrc").exists():
+        Path(".pylintrc").unlink()
 
 
 def _safe_or(elements: list[str], prefix: str = "") -> str:
@@ -992,28 +1192,29 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
     """
     Add or update the Poetry extensions to the pyproject.toml file.
     """
-    del task_env  # unused
 
-    poetry_version = version.parse("0.0.0")
-    for requirements_path in (
-        Path("requirements.txt"),
-        Path(".github/requirements.txt"),
-        Path("ci/requirements.txt"),
+    if task_env.python_versions_hook_version >= version.parse("1.1.1"):
+        for requirements_path in (
+            Path("requirements.txt"),
+            Path(".github/requirements.txt"),
+            Path("ci/requirements.txt"),
+        ):
+            if requirements_path.exists():
+                with mra.Edit(requirements_path) as requirements_txt:
+                    # Remove rependency poetry-plugin-
+                    for plugin in (
+                        "poetry-plugin-tweak-dependencies-version",
+                        "poetry-plugin-drop-python-upper-constraint",
+                    ):
+                        if plugin in requirements_txt.data:
+                            requirements_txt.data = "\n".join(
+                                line
+                                for line in requirements_txt.data.splitlines()
+                                if not line.startswith(f"{plugin}==")
+                            )
+    if task_env.config.enabled("poetry2-upgrade", default=True) and task_env.poetry_version >= version.parse(
+        "1.3.0",
     ):
-        if requirements_path.exists():
-            with mra.Edit(requirements_path) as requirements_txt:
-                for line in requirements_txt.data.splitlines():
-                    if line.startswith("poetry=="):
-                        poetry_version = version.parse(line.split("==")[1])
-                        break
-                # Remove rependency poetry-plugin-drop-python-upper-constraint
-                requirements_txt.data = "\n".join(
-                    line
-                    for line in requirements_txt.data.splitlines()
-                    if not line.startswith("poetry-plugin-drop-python-upper-constraint==")
-                )
-
-    if poetry_version >= version.parse("1.3.0"):
         typed = (
             len(
                 mra.run(
@@ -1069,9 +1270,9 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                                     f"{_VERSIONS['prospector-profile-duplicated']}"
                                 )
                             extra = dev_dependencies["prospector"].setdefault("extras", [])
-                            if "with_ruff" not in extra:
+                            if "with_ruff" not in extra and "with-ruff" not in extra:
                                 extra.append("with_ruff")
-                            if "with_pyroma" not in extra:
+                            if "with_pyroma" not in extra and "with-pyroma" not in extra:
                                 extra.append("with_pyroma")
 
                         # version_splitter = re.compile("[<>=]+")
@@ -1103,13 +1304,13 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                         #                     ):
                         #                         requirements_txt.data += f"{plugin}=={plugin_version}\n"
 
-                        if "poetry-plugin-drop-python-upper-constraint" in pyproject.get(
-                            "build-system",
-                            {},
-                        ).get("requires", []):
-                            pyproject["build-system"]["requires"].remove(
+                        if task_env.python_versions_hook_version >= version.parse("1.1.1"):
+                            for plugin in (
+                                "poetry-plugin-tweak-dependencies-version",
                                 "poetry-plugin-drop-python-upper-constraint",
-                            )
+                            ):
+                                if plugin in pyproject.get("build-system", {}).get("requires", []):
+                                    pyproject["build-system"]["requires"].remove(plugin)
 
                         poetry_dynamic_versioning = pyproject.setdefault("tool", {}).setdefault(
                             "poetry-dynamic-versioning",
@@ -1136,11 +1337,6 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                             ),
                             tomlkit.items.StringType.MLB,
                         )
-                        poetry_plugin_tweak_dependencies_version = pyproject.setdefault(
-                            "tool",
-                            {},
-                        ).setdefault("poetry-plugin-tweak-dependencies-version", {})
-                        poetry_plugin_tweak_dependencies_version.setdefault("default", "present")
 
                     pyproject.setdefault("tool", {}).setdefault("ruff", {})
                     pyproject["tool"]["ruff"].setdefault("target-version", "py310")
@@ -1330,6 +1526,14 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
                     f"/^{re.escape(prefix)}.*/" for prefix in package_rule["matchPackagePrefixes"]
                 ]
                 del package_rule["matchPackagePrefixes"]
+
+        # matchPackagePatterns => matchPackageNames, add '/' at the start and at the end
+        for package_rule in renovate_config.get("packageRules", []):
+            if "matchPackagePatterns" in package_rule:
+                package_rule["matchPackageNames"] = [
+                    f"/{pattern}/" for pattern in package_rule["matchPackagePatterns"]
+                ]
+                del package_rule["matchPackagePatterns"]
 
         for extend in renovate_config["extends"]:
             if isinstance(extend, mra.JSON5RowAttribute) and extend.value.startswith(
@@ -1533,6 +1737,26 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                         "id": "renovate-config-validator",
                     },
                 )
+
+            pre_commit_config.add_repo(
+                "https://github.com/pre-commit/mirrors-prettier",
+                _VERSIONS["pre-commit/mirrors-prettier"],
+            )
+            additional_dependencies = [
+                "prettier@" + _VERSIONS["prettier"],
+            ]
+            if task_env.has_toml_files:
+                additional_dependencies.append("prettier-plugin-toml@" + _VERSIONS["prettier-plugin-toml"])
+            pre_commit_config.add_hook(
+                "https://github.com/pre-commit/mirrors-prettier",
+                {
+                    "id": "prettier",
+                    "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                        additional_dependencies,
+                        "npm",
+                    ),
+                },
+            )
 
             filenames = {
                 Path(".github/publish.yaml"),
@@ -1880,137 +2104,6 @@ def _remove_docker_compose_version(task_env: _TaskEnv) -> None:
                 del docker_compose["version"]
 
 
-def _get_env() -> _TaskEnv:
-    config = _Config()
-
-    use_helm = config.enabled(
-        "helm",
-        Path("Chart.yaml").exists() or Path("test/helmchart/Chart.yaml").exists(),
-    )
-
-    gopass_ = config.enabled(
-        "gopass",
-        "no-gopass" not in config.repo.get("types", [])
-        and (config.repo["name"].startswith("camptocamp/") or config.repo["name"].startswith("mapfish/")),
-    )
-    # Get the string we used in the workflow to get the GitHub token to be used
-    token = config.value(
-        "github_token_secret",
-        "${{ secrets.GOPASS_CI_GITHUB_TOKEN }}" if gopass_ else "${{ secrets.TOKEN }}",
-    )
-
-    # Get the version of c2cciutils
-    c2cciutils_version = version.parse("1.6.0")
-    set_c2cciutils_version = False
-    requirements = Path(".github/requirements.txt")
-    requirements = requirements if requirements.exists() else Path("ci/requirements.txt")
-    if requirements.exists():
-        with mra.Edit(requirements) as requirements_txt:
-            requirements = [
-                r for r in requirements_txt.data.split("\n") if r.startswith(("c2cciutils==", "c2cciutils["))
-            ]
-            if len(requirements) == 1:
-                c2cciutils_version_string = requirements[0].split("==")[1]
-                c2cciutils_version_string = c2cciutils_version_string.removesuffix(".*")
-                c2cciutils_version = version.parse(c2cciutils_version_string)
-                set_c2cciutils_version = True
-    c2cciutils_version_config = config.value("c2cciutils_version")
-    if c2cciutils_version_config:
-        if c2cciutils_version_config == "master":
-            c2cciutils_version = version.parse("1.6.0")
-            set_c2cciutils_version = False
-        else:
-            c2cciutils_version = version.parse(c2cciutils_version_config)
-            set_c2cciutils_version = True
-
-    prospector_path = None
-    prospector_candidate_path = [
-        Path(".prospector.yaml"),
-        Path("app/.prospector.yaml"),
-        Path("api/.prospector.yaml"),
-        Path("docker/.prospector.yaml"),
-    ]
-
-    use_python = False
-    pyproject_path = None
-    for prospector_path_candidate in prospector_candidate_path:
-        if prospector_path_candidate.exists():
-            prospector_path = prospector_path_candidate
-            break
-
-    # min_python_version = ''
-    # max_python_version = ''
-    for pyproject_filename in (
-        Path("pyproject.toml"),
-        Path("app/pyproject.toml"),
-        Path("api/pyproject.toml"),
-        Path("docker/pyproject.toml"),
-    ):
-        if pyproject_filename.exists():
-            pyproject_path = pyproject_filename
-            with mra.EditTOML(pyproject_filename) as pyproject:
-                use_python = "project" in pyproject or "build-system" in pyproject
-                # min_python_version = pyproject.get("tool", {}).get("poetry", {}).get("dependencies", {}).get("python", "")
-                # match = re.match(r"^>=(\d+\.\d+),<(\d+)\.(\d+)$", min_python_version)
-                # if match:
-                #    min_python_version = match.group(1)
-                #    max_python_version_major = int(match.group(2))
-                #    max_python_version_minor = int(match.group(3))
-                #    if max_python_version_major == 4:
-                #        max_python_version = "3.13"
-                #    else:
-                #        max_python_version = f"{max_python_version_major}.{max_python_version_minor-1}"
-
-                break
-    use_python = config.enabled("python", use_python)
-    pyproject_path = config.value("pyproject_path", pyproject_path)
-    prospector_path = config.value("prospector_path", prospector_path)
-
-    use_pypi = config.enabled("pypi", use_python and "no-pypi" not in config.repo.get("type", []))
-    use_docker = config.enabled(
-        "docker",
-        (Path("Dockerfile").exists() or Path("app/Dockerfile").exists() or Path("api/Dockerfile").exists())
-        and "no-docker" not in config.repo.get("type", []),
-    )
-
-    stabilization_branches = mra.get_stabilization_branches(config.repo)
-
-    print("Task environment:")
-    print(f"  c2cciutils_version: {c2cciutils_version}")
-    print(f"  Set c2cciutils version: {set_c2cciutils_version}")
-    print(f"  Use Python: {use_python}")
-    print(f"  pyproject_path: {pyproject_path}")
-    print(f"  Prospector_path: {prospector_path}")
-    print(f"  Use pypi: {use_pypi}")
-    print(f"  Use Docker: {use_docker}")
-    print(f"  Use Helm: {use_helm}")
-    print(f"  On stabilization branches: {config.arguments.on_stabilization_branches}")
-    print(f"  Has stabilization branches: {len(stabilization_branches) > 0}")
-    print(f"  Stabilization branches: {stabilization_branches}")
-    print(f"  GoPass: {gopass}")
-
-    return _TaskEnv(
-        GitHub(_TOKEN),
-        c2cciutils_version,
-        set_c2cciutils_version,
-        use_python,
-        # min_python_version,
-        # max_python_version,
-        pyproject_path,
-        prospector_path,
-        use_pypi,
-        use_docker,
-        use_helm,
-        config.arguments.on_stabilization_branches or len(stabilization_branches) > 0,
-        config.arguments.on_stabilization_branches and len(stabilization_branches) > 0,
-        stabilization_branches,
-        gopass,
-        token,
-        config.enabled("publish", mra.git_grep("tag-publish") or mra.git_grep("c2cciutils-publish")),
-        config,
-    )
-
-
 def _ghci_updates(task_env: _TaskEnv) -> None:
     if (
         task_env.use_helm
@@ -2027,11 +2120,11 @@ profile: helm
 
 
 def _do() -> None:
-    task_env = _get_env()
-    print(f"Task environment: {task_env}")
+    task_env = _TaskEnv()
 
     for name, task in (
-        ("clean-update-workflow", _clean_update_workflow),
+        ("clean-workflow", _clean_workflow),
+        ("upgrade-deprecated-workflow", _upgrade_deprecated_action),
         (
             "update-dependency-auto-review-workflow",
             _update_pull_request_automation_workflow,
