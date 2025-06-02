@@ -41,3 +41,7 @@ ruff:
   disable:
     - S603 # `subprocess` call: check for execution of untrusted input
     - S607 # Starting a process with a partial executable path
+
+pycodestyle:
+  disable:
+    - E266 # too many leading '#' for block comment
