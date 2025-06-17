@@ -15,10 +15,10 @@
     /** Update the versions */
     {
       customType: 'regex',
-      fileMatch: ['^versions\\.yaml$'],
       matchStrings: [
         "'?(?<depName>[a-zA-Z0-9-_/]+)'?: '?(?<currentValue>[v0-9\\.]+)'? # (?<datasource>[a-z-]+)",
       ],
+      managerFilePatterns: ['/^versions\\.yaml$/'],
     },
   ],
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
