@@ -11,8 +11,8 @@ version = "0.0.0"
 [tool.poetry.dependencies]
 python = ">=3.9,<4.0"
 multi-repo-automation = "1.7.0"
-ruamel-yaml = "0.18.12"
-githubkit = "0.12.13"
+ruamel-yaml = "0.18.14"
+githubkit = "0.12.15"
 
 [tool.poetry.group.dev.dependencies]
 # pylint = "2.15.6"
