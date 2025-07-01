@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/sbrunner/.venv/bin/python
 # pylint: disable=invalid-name
 
 # T-O-D-O
@@ -1072,10 +1072,10 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
         for job in yaml["jobs"].values():
             job["name"] = "Auto reviews pull requests from bots"
 
-            # job["permissions"] = {
-            #    "contents": "write",
-            #    "pull-requests": "write",
-            # }
+            job["permissions"] = {
+                #    "contents": "write",
+                "pull-requests": "write",
+            }
 
             if "if" in job:
                 del job["if"]
@@ -1242,25 +1242,32 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                         "tool",
                         {},
                     ).get("poetry", {}).get("dependencies", {}):
-                        if "dev-dependencies" in pyproject["tool"]["poetry"]:
-                            if "dependencies" in pyproject["tool"]["poetry"].setdefault(
+                        if "dev-dependencies" in pyproject.get("tool", {}).get("poetry", {}):
+                            if "dependencies" in pyproject.get("tool", {}).get("poetry", {}).setdefault(
                                 "group",
                                 {},
                             ).setdefault("dev", {}):
-                                pyproject["tool"]["poetry"]["group"]["dev"]["dependencies"].update(
-                                    pyproject["tool"]["poetry"]["dev-dependencies"],
+                                pyproject.get("tool", {}).get("poetry", {})["group"]["dev"][
+                                    "dependencies"
+                                ].update(
+                                    pyproject.get("tool", {}).get("poetry", {})["dev-dependencies"],
                                 )
                             else:
-                                pyproject["tool"]["poetry"]["group"]["dev"]["dependencies"] = pyproject[
-                                    "tool"
-                                ]["poetry"]["dev-dependencies"]
-                            del pyproject["tool"]["poetry"]["dev-dependencies"]
+                                pyproject.get("tool", {}).get("poetry", {})["group"]["dev"][
+                                    "dependencies"
+                                ] = pyproject["tool"]["poetry"]["dev-dependencies"]
+                            del pyproject.get("tool", {}).get("poetry", {})["dev-dependencies"]
 
-                        if "prospector" in pyproject["tool"]["poetry"].get("group", {}).get("dev", {}).get(
+                        if "prospector" in pyproject.get("tool", {}).get("poetry", {}).get("group", {}).get(
+                            "dev",
+                            {},
+                        ).get(
                             "dependencies",
                             {},
                         ):
-                            dev_dependencies = pyproject["tool"]["poetry"]["group"]["dev"]["dependencies"]
+                            dev_dependencies = pyproject.get("tool", {}).get("poetry", {})["group"]["dev"][
+                                "dependencies"
+                            ]
                             if "prospector-profile-utils" not in dev_dependencies:
                                 dev_dependencies["prospector-profile-utils"] = (
                                     f"{_VERSIONS['prospector-profile-utils']}"
@@ -1391,12 +1398,12 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                     pyproject["project"]["dynamic"] = ["dependencies", "version"]
                     # Properties to move
                     for prop in ("name", "description", "readme", "keywords", "license", "classifiers"):
-                        if pyproject.get("tool").get("poetry").get(prop):
-                            pyproject["project"][prop] = pyproject["tool"]["poetry"].pop(prop)
+                        if pyproject.get("tool", {}).get("poetry", {}).get(prop):
+                            pyproject["project"][prop] = pyproject.get("tool", {}).get("poetry", {}).pop(prop)
                     # Email properties
                     email_re = re.compile(r"(.*) <(.*)>")
                     for prop in ("authors", "maintainers"):
-                        for email in pyproject.get("tool").get("poetry").pop(prop, []):
+                        for email in pyproject.get("tool", {}).get("poetry", {}).pop(prop, []):
                             email_match = email_re.match(email)
                             assert email_match
                             pyproject["project"].setdefault(prop, []).append(
@@ -1406,29 +1413,41 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                                 },
                             )
                     # Urls
-                    repo_url = pyproject["tool"]["poetry"].get("homepage")
-                    if pyproject["tool"]["poetry"].get("homepage") and not pyproject["tool"]["poetry"].get(
+                    repo_url = pyproject.get("tool", {}).get("poetry", {}).get("homepage")
+                    if pyproject.get("tool", {}).get("poetry", {}).get("homepage") and not pyproject.get(
+                        "tool",
+                        {},
+                    ).get("poetry", {}).get(
                         "homepage",
                     ).startswith("https://github.com/"):
                         pyproject["project"].setdefault("urls", {})["homepage"] = pyproject["tool"][
                             "poetry"
                         ].pop("homepage")
-                    if "homepage" in pyproject["tool"]["poetry"]:
-                        del pyproject["tool"]["poetry"]["homepage"]
-                    if "repository" in pyproject["tool"]["poetry"]:
-                        repo_url = pyproject["tool"]["poetry"].pop("repository")
+                    if "homepage" in pyproject.get("tool", {}).get("poetry", {}):
+                        del pyproject.get("tool", {}).get("poetry", {})["homepage"]
+                    if "repository" in pyproject.get("tool", {}).get("poetry", {}):
+                        repo_url = pyproject.get("tool", {}).get("poetry", {}).pop("repository")
                     if repo_url:
                         pyproject["project"].setdefault("urls", {})["repository"] = repo_url
                         pyproject["project"].setdefault("urls", {})["Bug Tracker"] = f"{repo_url}/issues"
                     # Scripts
-                    if "scripts" in pyproject["tool"]["poetry"]:
-                        pyproject["project"]["scripts"] = pyproject["tool"]["poetry"].pop("scripts")
+                    if "scripts" in pyproject.get("tool", {}).get("poetry", {}):
+                        pyproject["project"]["scripts"] = (
+                            pyproject.get("tool", {}).get("poetry", {}).pop("scripts")
+                        )
                     # Packages
-                    if "packages" in pyproject["tool"]["poetry"]:
-                        pyproject["project"]["packages"] = pyproject["tool"]["poetry"].pop("packages")
+                    if "packages" in pyproject.get("tool", {}).get(
+                        "poetry",
+                        {},
+                    ) and "packages" not in pyproject.get("project", {}):
+                        pyproject["project"]["packages"] = (
+                            pyproject.get("tool", {}).get("poetry", {}).pop("packages")
+                        )
                     # Include
-                    if "include" in pyproject["tool"]["poetry"]:
-                        pyproject["project"]["include"] = pyproject["tool"]["poetry"].pop("include")
+                    if "include" in pyproject.get("tool", {}).get("poetry", {}):
+                        pyproject["project"]["include"] = (
+                            pyproject.get("tool", {}).get("poetry", {}).pop("include")
+                        )
 
 
 def _update_prospector_config(task_env: _TaskEnv) -> None:
@@ -1535,6 +1554,18 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePatterns"]
 
+        for custom_manager in renovate_config.get("customManagers", []):
+            if "fileMatch" in custom_manager:
+                attribute = custom_manager["fileMatch"]
+                attribute = [
+                    pattern.value if isinstance(pattern, mra.JSON5RowAttribute) else pattern
+                    for pattern in attribute
+                ]
+                custom_manager["managerFilePatterns"] = [
+                    f"/{pattern}/" if not pattern.startswith("/") else pattern for pattern in attribute
+                ]
+                del custom_manager["fileMatch"]
+
         for extend in renovate_config["extends"]:
             if isinstance(extend, mra.JSON5RowAttribute) and extend.value.startswith(
                 "github>camptocamp/gs-renovate-config-preset:preset.json5#",
@@ -1617,6 +1648,15 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
                 extend1 = extend1.value
             if isinstance(extend2, mra.JSON5RowAttribute):
                 extend2 = extend2.value
+            # security and stabilization-branches should be at the end
+            for preset in ["security", "own", "stabilization-branches"]:
+                if extend1.startswith(f"github>camptocamp/gs-renovate-config-preset:{preset}.json5#"):
+                    if extend2.startswith(f"github>camptocamp/gs-renovate-config-preset:{preset}.json5#"):
+                        return 0
+                    return 1
+                if extend2.startswith(f"github>camptocamp/gs-renovate-config-preset:{preset}.json5#"):
+                    return -1
+            # base, group, ci and preset should be at the beginning
             for preset in ["base", "group", "stabilization-branches", "ci"]:
                 if extend1.startswith(f"github>camptocamp/gs-renovate-config-preset:{preset}"):
                     return -1
@@ -1627,6 +1667,7 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
         renovate_config["extends"] = mra.JSON5List(
             sorted(renovate_config["extends"], key=functools.cmp_to_key(cmp)),
         )
+
         for property_ in (
             "timezone",
             "schedule",
@@ -1644,20 +1685,37 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
             if property_ in renovate_config:
                 del renovate_config[property_]
         if "html" in renovate_config and (
-            renovate_config["html"] == {"fileMatch": ["\\.html?$", "\\.html?.mako$"]}
-            or renovate_config["html"] == {"fileMatch": ["\\.html?$"]}
-            or renovate_config["html"] == {"fileMatch": ["\\.html?.mako$"]}
+            renovate_config["html"] == {"managerFilePatterns": ["/\\.html?$/", "/\\.html?.mako$/"]}
+            or renovate_config["html"] == {"managerFilePatterns": ["/\\.html?$/"]}
+            or renovate_config["html"] == {"managerFilePatterns": ["/\\.html?.mako$/"]}
         ):
             del renovate_config["html"]
 
         renovate_config.remove_package_rule({}, ["Group and auto merge the patch updates"])
         renovate_config.remove_package_rule({}, ["Group and auto merge the minor updates"])
+        renovate_config.remove_package_rule({}, ["Automerge the patch, the minor and the dev dependency"])
 
         # CI
         renovate_config.remove_package_rule({}, ["Group the dev dependency update"])
         renovate_config.remove_package_rule({}, ["Auto merge the dev dependency update"])
         renovate_config.remove_package_rule({}, ["Group and auto merge the CI dependencies"])
-        renovate_config.remove_regex_manager({}, ["Group and auto merge the GitHub action"])
+        renovate_config.remove_package_rule({}, ["Group and auto merge the GitHub action"])
+        renovate_config.remove_package_rule(
+            {
+                "matchUpdateTypes": ["patch"],
+                "groupName": "all patch versions",
+                "automerge": True,
+            },
+            ["Group the patch and the minor"],
+        )
+        renovate_config.remove_package_rule(
+            {
+                "matchUpdateTypes": ["minor"],
+                "groupName": "all minor versions",
+                "automerge": True,
+            },
+            ["Group the patch and the minor"],
+        )
 
         # pre-commit
         if "pre-commit" in renovate_config:
@@ -1683,6 +1741,16 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
             ["Support the 4 parts of shellcheck-py version with a v prefix"],
         )
 
+        # Node
+        renovate_config.remove_package_rule(
+            {
+                "allowedVersions": "/(0|2|4|6|8)$/",
+                "matchPackageNames": ["node"],
+                "enabled": False,
+            },
+            ["Only LTS version of Node"],
+        )
+
         renovate_config.remove_package_rule({}, ["Update dpkg versions at any time"])
         renovate_config.remove_regex_manager({}, ["Do update on the schema present in the ci/config.yaml"])
 
@@ -1691,16 +1759,6 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
                 del renovate_config["baseBranches"]
             renovate_config.remove_package_rule({}, ["Accept only the patch on stabilization branches"])
             renovate_config.remove_package_rule({}, ["Accept only the patch on the stabilization branches"])
-
-        renovate_config.remove_package_rule({}, ["In file .python-version, use the <major>.<minor> version"])
-        if Path(".python-version").exists():
-            renovate_config.add_package_rule(
-                {
-                    "matchFileNames": [".python-version"],
-                    "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)$",
-                },
-                ["In file `.python-version`, use the `<major>.<minor>` version"],
-            )
 
         renovate_config.remove_package_rule({}, ["Group Poetry packages"])
         if "packageRules" in renovate_config and not renovate_config["packageRules"]:

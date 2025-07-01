@@ -8,15 +8,17 @@
 #   ./add-pre-commit-hooks --local
 
 
-import os
+import argparse
 import re
 import subprocess
+from pathlib import Path
+from typing import Any
 
 import multi_repo_automation as mra
 import yaml
 
 
-def _convert():
+def _convert() -> None:
     repo_config = mra.get_repo_config()
     if not repo_config.get("pre-commit", True):
         return
@@ -41,7 +43,7 @@ pre-commit install --allow-missing-config
 ```
 """
 
-    if os.path.exists(".github/renovate.json5"):
+    if Path(".github/renovate.json5").exists():
         with mra.EditRenovateConfig() as renovate_edit:
             renovate_edit.data = renovate_edit.data.replace(
                 "'^.pre-commit-config.yaml'",
@@ -61,7 +63,8 @@ pre-commit install --allow-missing-config
                 "'^.pre-commit-config\\\\.yaml$'",
             )
 
-        if os.path.exists("ci/requirements.txt"):
+        requirements_path = Path("ci/requirements.txt")
+        if requirements_path.exists():
             with mra.Edit("ci/requirements.txt") as requirements:
                 if "pre-commit" not in requirements.data:
                     version = (
@@ -82,8 +85,9 @@ pre-commit install --allow-missing-config
 
                     requirements.data = requirements.data.rstrip() + f"\npre-commit=={version}\n"
 
-    if not os.path.exists(".pre-commit-config.yaml"):
-        with open(".pre-commit-config.yaml", "w") as f:
+    pre_commit_config_path = Path(".pre-commit-config.yaml")
+    if not pre_commit_config_path.exists():
+        with pre_commit_config_path.open("w", encoding="utf-8") as f:
             f.write(
                 """# https://pre-commit.com/hooks.html
 
@@ -95,12 +99,12 @@ repos: []
             )
 
     with mra.Edit(".pre-commit-config.yaml") as config:
-        # TODO add missing # pip and # npm
+        # TODO: add missing # pip and # npm
         config.data = config.data.replace(
             "https://github.com/sbrunner/pre-commit-copyright",
             "https://github.com/sbrunner/hooks",
         )
-        if os.path.exists(".github/renovate.json5"):
+        if Path(".github/renovate.json5").exists():
             config.data = re.sub(r"^( +- [^\s]+==[^\s]+)$", r"\1 # pypi", config.data, flags=re.MULTILINE)
             config.data = re.sub(r"^( +- [^\s]+@[^\s]+)$", r"\1 # npm", config.data, flags=re.MULTILINE)
 
@@ -109,20 +113,21 @@ repos: []
     time.sleep(1)
 
     ci_config = {}
-    if os.path.exists("ci/config.yaml"):
-        with open("ci/config.yaml", encoding="utf-8") as f:
+    config_yaml_path = Path("ci/config.yaml")
+    if config_yaml_path.exists():
+        with config_yaml_path.open(encoding="utf-8") as f:
             ci_config = yaml.safe_load(f)
 
     with mra.EditPreCommitConfig() as pre_commit_config:
         _curent_repos = None
 
-        def add_repo(repo, *args):
+        def add_repo(repo: str, *args: Any) -> None:
             nonlocal _curent_repos
             _curent_repos = repo
             if repo not in no_repo:
                 pre_commit_config.add_repo(repo, *args)
 
-        def add_hook(hook):
+        def add_hook(hook: dict[str, Any]) -> None:
             if _curent_repos not in no_repo and hook["id"] not in no_hook:
                 pre_commit_config.add_hook(_curent_repos, hook)
 
@@ -146,13 +151,16 @@ repos: []
 
         spell_options["exclude"] = pre_commit_config.create_files_regex(ignore_re)
 
-        if os.path.exists("spell-ignore-words.txt") and not os.path.exists(".spell-ignore-words.txt"):
-            mra.run(["git", "mv", "spell-ignore-words.txt", ".spell-ignore-words.txt"])
-        if os.path.exists(".spell-ignore-words.txt"):
+        spell_ignore_path = Path("spell-ignore-words.txt")
+        spell_ignore_hidden_path = Path(".spell-ignore-words.txt")
+        if spell_ignore_path.exists() and not spell_ignore_hidden_path.exists():
+            mra.run(["git", "mv", str(spell_ignore_path), str(spell_ignore_hidden_path)])
+        if spell_ignore_hidden_path.exists():
             spell_options["args"] = ["--ignore-words=.spell-ignore-words.txt"]
 
-            if os.path.exists("ci/config.yaml"):
-                with mra.EditYAML("ci/config.yaml") as config:
+            config_yaml_path = Path("ci/config.yaml")
+            if config_yaml_path.exists():
+                with mra.EditYAML(str(config_yaml_path)) as config:
                     config.setdefault("checks", {})["codespell"] = False
 
         black_options = {}
@@ -169,7 +177,7 @@ repos: []
         add_hook({"id": "debug-statements"})
         add_hook({"id": "check-toml"})
         # Is Helm repository
-        if os.path.exists("Chart.yaml"):
+        if Path("Chart.yaml").exists():
             add_hook(
                 {
                     "id": "check-yaml",
@@ -238,7 +246,7 @@ repos: []
         add_hook({"id": "git-check"})
 
         add_repo("https://github.com/python-jsonschema/check-jsonschema")
-        if os.path.exists("action.yml"):
+        if Path("action.yml").exists():
             add_hook({"id": "check-github-actions"})
         add_hook({"id": "check-github-workflows"})
         add_hook(
@@ -250,7 +258,7 @@ repos: []
                 "args": ["--builtin-schema", "github-workflows-require-timeout"],
             },
         )
-        if os.path.exists(".github/renovate.json5"):
+        if Path(".github/renovate.json5").exists():
             add_hook(
                 {
                     "id": "check-renovate",
@@ -278,7 +286,7 @@ repos: []
             add_repo("https://github.com/psf/black")
             add_hook({"id": "black", **black_options})
 
-        if os.path.exists(".eslint.yaml"):
+        if Path(".eslint.yaml").exists():
             add_repo("https://github.com/pre-commit/mirrors-eslint")
             add_hook(
                 {
@@ -295,8 +303,9 @@ repos: []
                 },
             )
 
-    if os.path.exists(".github/workflows/main.yaml"):
-        with mra.EditYAML(".github/workflows/main.yaml") as main:
+    workflows_path = Path(".github/workflows/main.yaml")
+    if workflows_path.exists():
+        with mra.EditYAML(str(workflows_path)) as main:
             for job in main["jobs"].values():
                 found = False
                 index = -1
@@ -348,7 +357,7 @@ repos: []
         )
 
 
-def _add_arguments(args_parser):
+def _add_arguments(args_parser: argparse.ArgumentParser) -> None:
     args_parser = args_parser.add_argument_group("pre-commit", "Parameters related to the pre-commit.")
     args_parser.add_argument(
         "--no-repo",
