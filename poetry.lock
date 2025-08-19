@@ -347,21 +347,6 @@ files = [
 flake8 = "*"
 
 [[package]]
-name = "gitdb"
-version = "4.0.12"
-description = "Git Object Database"
-optional = false
-python-versions = ">=3.7"
-groups = ["dev"]
-files = [
-    {file = "gitdb-4.0.12-py3-none-any.whl", hash = "sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf"},
-    {file = "gitdb-4.0.12.tar.gz", hash = "sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571"},
-]
-
-[package.dependencies]
-smmap = ">=3.0.1,<6"
-
-[[package]]
 name = "githubkit"
 version = "0.13.0"
 description = "GitHub SDK for Python"
@@ -385,26 +370,6 @@ all = ["PyJWT[crypto] (>=2.4.0,<3.0.0)"]
 auth = ["PyJWT[crypto] (>=2.4.0,<3.0.0)"]
 auth-app = ["PyJWT[crypto] (>=2.4.0,<3.0.0)"]
 jwt = ["PyJWT[crypto] (>=2.4.0,<3.0.0)"]
-
-[[package]]
-name = "gitpython"
-version = "3.1.45"
-description = "GitPython is a Python library used to interact with Git repositories"
-optional = false
-python-versions = ">=3.7"
-groups = ["dev"]
-files = [
-    {file = "gitpython-3.1.45-py3-none-any.whl", hash = "sha256:8908cb2e02fb3b93b7eb0f2827125cb699869470432cc885f019b8fd0fccff77"},
-    {file = "gitpython-3.1.45.tar.gz", hash = "sha256:85b0ee964ceddf211c41b9f27a49086010a190fd8132a24e21f362a4b36a791c"},
-]
-
-[package.dependencies]
-gitdb = ">=4.0.1,<5"
-typing-extensions = {version = ">=3.10.0.2", markers = "python_version < \"3.10\""}
-
-[package.extras]
-doc = ["sphinx (>=7.1.2,<7.2)", "sphinx-autodoc-typehints", "sphinx_rtd_theme"]
-test = ["coverage[toml]", "ddt (>=1.1.1,!=1.4.3)", "mock ; python_version < \"3.8\"", "mypy", "pre-commit", "pytest (>=7.3.1)", "pytest-cov", "pytest-instafail", "pytest-mock", "pytest-sugar", "typing-extensions ; python_version < \"3.11\""]
 
 [[package]]
 name = "h11"
@@ -821,22 +786,21 @@ type = ["mypy (>=1.14.1)"]
 
 [[package]]
 name = "prospector"
-version = "1.16.1"
+version = "1.17.3"
 description = "Prospector is a tool to analyse Python code by aggregating the result of other tools."
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "prospector-1.16.1-py3-none-any.whl", hash = "sha256:7cb7549aad3219fa6da82962acd6b6871f5a6aa3ab8d0dfcaa5bcb17f05774ff"},
-    {file = "prospector-1.16.1.tar.gz", hash = "sha256:a6087287722104788c4366272c7f2095c748cb8968c5aac48c764f9e3eff2fea"},
+    {file = "prospector-1.17.3-py3-none-any.whl", hash = "sha256:e3698bba95f86ef50d626df33b29272cf6462061aca2b19161186c4405a6a402"},
+    {file = "prospector-1.17.3.tar.gz", hash = "sha256:c4df723012c45fc70f5b71f5eee318dbccaf903c2012c8ecf3ec89f60e5cb822"},
 ]
 
 [package.dependencies]
-bandit = {version = ">=1.5.1", optional = true, markers = "extra == \"with-bandit\" or extra == \"with_everything\""}
+bandit = {version = "*", optional = true, markers = "extra == \"with-bandit\""}
 dodgy = ">=0.2.1,<0.3.0"
-GitPython = ">=3.1.27,<4.0.0"
 mccabe = ">=0.7.0,<0.8.0"
-mypy = {version = ">=0.600", optional = true, markers = "extra == \"with-mypy\" or extra == \"with_everything\""}
+mypy = {version = "*", optional = true, markers = "extra == \"with-mypy\""}
 packaging = "*"
 pep8-naming = ">=0.3.3,<=0.10.0"
 pycodestyle = ">=2.9.0"
@@ -845,21 +809,21 @@ pyflakes = ">=2.2.0"
 pylint = ">=3.0"
 pylint-celery = "0.3"
 pylint-django = ">=2.6.1"
-pyroma = {version = ">=2.4", optional = true, markers = "extra == \"with-pyroma\" or extra == \"with_everything\""}
+pyroma = {version = "*", optional = true, markers = "extra == \"with-pyroma\""}
 PyYAML = "*"
 requirements-detector = ">=1.3.2"
-ruff = {version = "*", optional = true, markers = "extra == \"with-ruff\" or extra == \"with_everything\""}
+ruff = {version = "*", optional = true, markers = "extra == \"with-ruff\""}
 setoptconf-tmp = ">=0.3.1,<0.4.0"
 toml = ">=0.10.2,<0.11.0"
 
 [package.extras]
-with-bandit = ["bandit (>=1.5.1)"]
-with-everything = ["bandit (>=1.5.1)", "mypy (>=0.600)", "pyright (>=1.1.3)", "pyroma (>=2.4)", "ruff", "vulture (>=1.5)"]
-with-mypy = ["mypy (>=0.600)"]
-with-pyright = ["pyright (>=1.1.3)"]
-with-pyroma = ["pyroma (>=2.4)"]
+with-bandit = ["bandit"]
+with-everything = ["bandit", "mypy", "pyright", "pyroma", "ruff", "vulture"]
+with-mypy = ["mypy"]
+with-pyright = ["pyright"]
+with-pyroma = ["pyroma"]
 with-ruff = ["ruff"]
-with-vulture = ["vulture (>=1.5)"]
+with-vulture = ["vulture"]
 
 [[package]]
 name = "prospector-profile-duplicated"
@@ -878,14 +842,14 @@ prospector = ">=1.15.0"
 
 [[package]]
 name = "prospector-profile-utils"
-version = "1.22.3"
+version = "1.26.1"
 description = "Some utility Prospector profiles."
 optional = false
 python-versions = "*"
 groups = ["dev"]
 files = [
-    {file = "prospector_profile_utils-1.22.3-py2.py3-none-any.whl", hash = "sha256:56f10178f80c8f3c40fc1a68515d047bee3fddf32669753761d3ce9eb17792cf"},
-    {file = "prospector_profile_utils-1.22.3.tar.gz", hash = "sha256:f3e782787be6309a3c3574f4ec8f3785daddf736b1d2c2c2ee380cc789df2941"},
+    {file = "prospector_profile_utils-1.26.1-py2.py3-none-any.whl", hash = "sha256:5442b986c80c26c2b3f39e3a7f70d230d4045c6fdb679e3c535934f8d61d36a2"},
+    {file = "prospector_profile_utils-1.26.1.tar.gz", hash = "sha256:cec9f57eedb6f50f1106e3bb5a8409722c5db62756665d95c3178f2094994937"},
 ]
 
 [package.dependencies]
@@ -1491,18 +1455,6 @@ test = ["build[virtualenv] (>=1.0.3)", "filelock (>=3.4.0)", "ini2toml[lite] (>=
 type = ["importlib_metadata (>=7.0.2) ; python_version < \"3.10\"", "jaraco.develop (>=7.21) ; sys_platform != \"cygwin\"", "mypy (==1.14.*)", "pytest-mypy"]
 
 [[package]]
-name = "smmap"
-version = "5.0.2"
-description = "A pure Python implementation of a sliding window memory map manager"
-optional = false
-python-versions = ">=3.7"
-groups = ["dev"]
-files = [
-    {file = "smmap-5.0.2-py3-none-any.whl", hash = "sha256:b30115f0def7d7531d22a0fb6502488d879e75b260a9db4d0819cfb25403af5e"},
-    {file = "smmap-5.0.2.tar.gz", hash = "sha256:26ea65a03958fa0c8a1c7e8c7a58fdc77221b8910f6be2131affade476898ad5"},
-]
-
-[[package]]
 name = "sniffio"
 version = "1.3.1"
 description = "Sniff out which async library your code is running under"
@@ -1689,4 +1641,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.9,<4.0"
-content-hash = "ac6edce500713a87767c5e5b34c1b34aaf73e6f8b5613e176e6f86cad5a01d79"
+content-hash = "644682f2078fdaa21444c703493d2b244b2398d8853ce36a7540b9895c30c912"
