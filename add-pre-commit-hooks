@@ -108,7 +108,7 @@ repos: []
             config.data = re.sub(r"^( +- [^\s]+==[^\s]+)$", r"\1 # pypi", config.data, flags=re.MULTILINE)
             config.data = re.sub(r"^( +- [^\s]+@[^\s]+)$", r"\1 # npm", config.data, flags=re.MULTILINE)
 
-    import time
+    import time  # noqa: PLC0415
 
     time.sleep(1)
 

@@ -26,6 +26,11 @@ from packaging import version
 # mra.edit("file")
 # input()
 
+# T-O-D-O:
+# Add in pyproject.toml:
+# [tool.poetry-plugin-tweak-dependencies-version]
+# default = "present"
+
 _VERSIONS = {}
 with (Path(__file__).parent / "versions.yaml").open(encoding="utf-8") as f:
     _VERSIONS = py_yaml.load(f, Loader=py_yaml.SafeLoader)
@@ -739,28 +744,16 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
             for job in yaml["jobs"].values():
                 pre_commit_index = -1
                 has_pre_commit_artifacts = False
-                publish_index = -1
-                tag_publish_index = -1
-                has_publish_artifacts = False
                 for index, step in enumerate(job["steps"]):
                     if step.get("run", "").startswith("pre-commit run"):
                         if step["run"] == "pre-commit run --all-files":
                             step["run"] = "pre-commit run --all-files --color=always"
                         pre_commit_index = index
-                    if step.get("run", "").startswith("c2cciutils-publish"):
-                        publish_index = index
-                    if task_env.publish and step.get("run", "").startswith("tag-publish"):
-                        tag_publish_index = index
                     if (
                         step.get("uses", "").startswith("actions/upload-artifact@")
                         and step.get("with", {}).get("name", "") == "Apply pre-commit fix.patch"
                     ):
                         has_pre_commit_artifacts = True
-                    if (
-                        step.get("uses", "").startswith("actions/upload-artifact@")
-                        and step.get("with", {}).get("name", "") == "Update dpkg versions list.patch"
-                    ):
-                        has_publish_artifacts = True
                     if (
                         step.get("uses", "").startswith("actions/checkout@")
                         and step.get("restore-keys", "")
@@ -787,18 +780,18 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
                         has_pre_commit_artifacts,
                         "Apply pre-commit fix",
                     ),
-                    (
-                        publish_index,
-                        "dpkg-versions",
-                        has_publish_artifacts,
-                        "Update dpkg versions list",
-                    ),
-                    (
-                        tag_publish_index,
-                        "dpkg-versions",
-                        has_publish_artifacts,
-                        "Update dpkg versions list",
-                    ),
+                    # (
+                    #     publish_index,
+                    #     "dpkg-versions",
+                    #     has_publish_artifacts,
+                    #     "Update dpkg versions list",
+                    # ),
+                    # (
+                    #     tag_publish_index,
+                    #     "dpkg-versions",
+                    #     has_publish_artifacts,
+                    #     "Update dpkg versions list",
+                    # ),
                 ):
                     if index >= 0:
                         if not task_env.on_stabilization_branches and (
@@ -838,8 +831,6 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
                                 },
                             )
                             index_add += 1
-
-                publish_index = -1
 
                 for index, step in enumerate(job["steps"]):
                     if not task_env.on_stabilization_branches:
@@ -1238,6 +1229,15 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                         if typed and "Typing :: Typed" not in classifiers:
                             classifiers.append("Typing :: Typed")
                         pyproject["project"]["classifiers"] = sorted(classifiers)
+
+                        # Packages
+                        if "packages" in pyproject.get("tool", {}).get(
+                            "poetry",
+                            {},
+                        ) and "packages" not in pyproject.get("project", {}):
+                            pyproject["project"]["packages"] = (
+                                pyproject.get("tool", {}).get("poetry", {}).pop("packages")
+                            )
                     if "requires" in pyproject.get("build-system", {}) and "python" in pyproject.get(
                         "tool",
                         {},
@@ -1435,14 +1435,6 @@ def _update_pyproject_toml(task_env: _TaskEnv) -> None:
                         pyproject["project"]["scripts"] = (
                             pyproject.get("tool", {}).get("poetry", {}).pop("scripts")
                         )
-                    # Packages
-                    if "packages" in pyproject.get("tool", {}).get(
-                        "poetry",
-                        {},
-                    ) and "packages" not in pyproject.get("project", {}):
-                        pyproject["project"]["packages"] = (
-                            pyproject.get("tool", {}).get("poetry", {}).pop("packages")
-                        )
                     # Include
                     if "include" in pyproject.get("tool", {}).get("poetry", {}):
                         pyproject["project"]["include"] = (
@@ -1554,6 +1546,26 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
                 ]
                 del package_rule["matchPackagePatterns"]
 
+            if "matchPaths" in package_rule:
+                package_rule["matchFileNames"] = package_rule["matchPaths"]
+                del package_rule["matchPaths"]
+
+        if "baseBranches" in renovate_config:
+            renovate_config.data.children = {
+                key if key != "baseBranches" else "baseBranchPatterns": value
+                for key, value in renovate_config.items()
+            }
+        for element in ("html", "helm-values", "kubernetes"):
+            if element in renovate_config and "fileMatch" in renovate_config[element]:
+                attribute = renovate_config[element]["fileMatch"]
+                attribute = [
+                    pattern.value if isinstance(pattern, mra.JSON5RowAttribute) else pattern
+                    for pattern in attribute
+                ]
+                renovate_config[element]["managerFilePatterns"] = [
+                    f"/{pattern}/" if not pattern.startswith("/") else pattern for pattern in attribute
+                ]
+                del renovate_config[element]["fileMatch"]
         for custom_manager in renovate_config.get("customManagers", []):
             if "fileMatch" in custom_manager:
                 attribute = custom_manager["fileMatch"]
@@ -1923,6 +1935,37 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                     "id": "canonicalize",
                 },
             )
+            if task_env.use_python and task_env.prospector_path:
+                pre_commit_config.add_hook(
+                    "https://github.com/sbrunner/hooks",
+                    {
+                        "id": "prospector-to-ruff",
+                        "additional_dependencies": pre_commit_config.commented_additional_dependencies(
+                            [
+                                "prospector-profile-duplicated=="
+                                + _VERSIONS["prospector-profile-duplicated"],
+                                "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
+                            ],
+                            "pypi",
+                        ),
+                    },
+                )
+                prospector_to_ruff_hooks = pre_commit_config.repos_hooks["https://github.com/sbrunner/hooks"][
+                    "hooks"
+                ]["prospector-to-ruff"]
+                if prospector_to_ruff_hooks:
+                    if Path(".prospector-tests.yaml").exists():
+                        prospector_to_ruff_hooks[0]["args"] = [
+                            "--test=.prospector-tests.yaml",
+                        ]
+                    elif Path(".prospector-test.yaml").exists():
+                        prospector_to_ruff_hooks[0]["args"] = [
+                            "--test=.prospector-test.yaml",
+                        ]
+                    else:
+                        prospector_to_ruff_hooks[0]["args"] = [
+                            "--test=utils:tests",
+                        ]
 
             for repo in pre_commit_config["repos"]:
                 if repo["repo"] == "https://github.com/python-jsonschema/check-jsonschema":
