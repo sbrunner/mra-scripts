@@ -106,6 +106,15 @@ repos:
             |use-prospector-profile
             |use-renovate-to-trigger-rebuild
           )$
+      - id: prospector
+        args:
+          - --die-on-tool-error
+          - --output-format=pylint
+          - --profile=utils:tests
+          - --profile=utils:pre-commit
+        additional_dependencies:
+          - prospector-profile-utils==1.26.1 # pypi
+          - ruff==0.12.7 # pypi
   - repo: https://github.com/sbrunner/python-versions-hook
     rev: 1.1.2
     hooks:
