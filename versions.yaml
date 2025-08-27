@@ -5,7 +5,7 @@ mheap/json-schema-spell-checker: v2.2.0 # github-tags
 astral-sh/ruff-pre-commit: v0.12.7 # github-tags
 PyCQA/prospector: v1.17.3 # github-tags
 prospector-profile-duplicated: 1.10.5 # pypi
-prospector-profile-utils: 1.26.4 # pypi
+prospector-profile-utils: 1.26.5 # pypi
 pylint: 3.3.7 # pypi
 ruff: 0.12.7 # pypi
 sbrunner/python-versions-hook: 1.1.2 # github-tags

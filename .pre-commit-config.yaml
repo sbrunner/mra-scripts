@@ -25,7 +25,7 @@ repos:
       - id: prospector-to-ruff
         additional_dependencies:
           - prospector-profile-duplicated==1.10.5 # pypi
-          - prospector-profile-utils==1.26.4 # pypi
+          - prospector-profile-utils==1.26.5 # pypi
         args:
           - --test=utils:tests
   - repo: https://github.com/codespell-project/codespell
@@ -97,7 +97,7 @@ repos:
           - --profile=.prospector.yaml
         additional_dependencies:
           - prospector-profile-duplicated==1.10.5 # pypi
-          - prospector-profile-utils==1.26.4 # pypi
+          - prospector-profile-utils==1.26.5 # pypi
           - pylint[spelling]==3.3.6 # pypi
           - ruff==0.12.7 # pypi
         exclude: |-
