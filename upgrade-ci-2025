@@ -22,7 +22,7 @@ from packaging import version
 # if os.path.exists(".github/renovate.json5"):
 # if mra.run(["grep", "text", ".github/renovate.json5"], exit_on_error=False).returncode != 0: # not found
 # if mra.git_grep(r"\<text\>"]): # found
-# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != b"": # found
+# if mra.run(["git", "ls-files", "**/*.txt"], stdout=subprocess.PIPE).stdout.strip() != "": # found
 # mra.edit("file")
 # input()
 
@@ -150,6 +150,7 @@ class _TaskEnv:
         ):
             if pyproject_filename.exists():
                 pyproject_path = pyproject_filename
+                break
 
         return self.config.value("pyproject_path", pyproject_path)
 
@@ -167,6 +168,16 @@ class _TaskEnv:
                 prospector_path = prospector_path_candidate
                 break
         return self.config.value("prospector_path", prospector_path)
+
+    @property
+    def python_tests(self) -> bool:
+        if mra.run(["git", "ls-files", "tests"], stdout=subprocess.PIPE).stdout.strip() != "":
+            return True
+        if mra.run(["git", "ls-files", "test"], stdout=subprocess.PIPE).stdout.strip() != "":
+            return True
+        if mra.run(["git", "ls-files", "test_*.py"], stdout=subprocess.PIPE).stdout.strip() != "":
+            return True
+        return mra.run(["git", "ls-files", "*_test.py"], stdout=subprocess.PIPE).stdout.strip() != ""
 
     @property
     def use_pypi(self) -> bool:
@@ -2064,36 +2075,38 @@ def _update_pre_commit_config(task_env: _TaskEnv) -> None:
                                     [deps],
                                     "pypi",
                                 )
-                        if len(prospector_hooks) == 1:
-                            pre_commit_config.add_hook(
-                                "https://github.com/PyCQA/prospector",
-                                {
-                                    "id": "prospector",
-                                    "args": [
-                                        "--die-on-tool-error",
-                                        "--output-format=pylint",
-                                        "--profile=utils:tests",
-                                        "--profile=utils:pre-commit",
+
+                        if task_env.python_tests:
+                            if len(prospector_hooks) == 1:
+                                pre_commit_config.add_hook(
+                                    "https://github.com/PyCQA/prospector",
+                                    {
+                                        "id": "prospector",
+                                        "args": [
+                                            "--die-on-tool-error",
+                                            "--output-format=pylint",
+                                            "--profile=utils:tests",
+                                            "--profile=utils:pre-commit",
+                                        ],
+                                    },
+                                    force=True,
+                                )
+                                pre_commit_config.add_commented_additional_dependencies(
+                                    prospector_hooks[1],
+                                    [
+                                        "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
+                                        "ruff==" + _VERSIONS["ruff"],
                                     ],
-                                },
-                                force=True,
-                            )
-                            pre_commit_config.add_commented_additional_dependencies(
-                                prospector_hooks[1],
-                                [
-                                    "prospector-profile-utils==" + _VERSIONS["prospector-profile-utils"],
-                                    "ruff==" + _VERSIONS["ruff"],
-                                ],
-                                "pypi",
-                            )
-                        else:
-                            prospector_hooks[1]["args"] = [
-                                arg
-                                for arg in prospector_hooks[1]["args"]
-                                if not arg.startswith("--tool=") and arg != "--profile=utils:autofix"
-                            ]
-                            if "--profile=utils:pre-commit" not in prospector_hooks[1]["args"]:
-                                prospector_hooks[1]["args"].append("--profile=utils:pre-commit")
+                                    "pypi",
+                                )
+                            else:
+                                prospector_hooks[1]["args"] = [
+                                    arg
+                                    for arg in prospector_hooks[1]["args"]
+                                    if not arg.startswith("--tool=") and arg != "--profile=utils:autofix"
+                                ]
+                                if "--profile=utils:pre-commit" not in prospector_hooks[1]["args"]:
+                                    prospector_hooks[1]["args"].append("--profile=utils:pre-commit")
                 pre_commit_config.add_repo(
                     "https://github.com/astral-sh/ruff-pre-commit",
                     _VERSIONS["astral-sh/ruff-pre-commit"],
