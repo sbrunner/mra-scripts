@@ -43,7 +43,7 @@ jobs:
       - run: git diff --exit-code --patch > /tmp/pre-commit.patch; git diff --color; git reset --hard || true
         if: failure()
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Apply pre-commit fix.patch
           path: /tmp/pre-commit.patch
@@ -51,7 +51,7 @@ jobs:
         if: failure()
 
       - run: touch PRE_COMMIT_SUCCESS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: PRE_COMMIT_SUCCESS
           path: PRE_COMMIT_SUCCESS
@@ -81,6 +81,6 @@ jobs:
       - run: poetry run prospector --output-format=pylint
 
       # To make the workflow fail if the pre-commit hook failed
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           name: PRE_COMMIT_SUCCESS
