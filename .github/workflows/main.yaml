@@ -20,7 +20,7 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, '[skip ci] ')"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: GitHub event
         run: echo ${GITHUB_EVENT} | python3 -m json.tool
@@ -65,7 +65,7 @@ jobs:
     needs: pre-commit
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: GitHub event
         run: echo ${GITHUB_EVENT} | python3 -m json.tool
