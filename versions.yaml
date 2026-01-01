@@ -18,7 +18,7 @@ poetry-plugin-export: 1.9.0 # pypi
 sbrunner/jsonschema-validator: 1.0.0 # github-tags
 actions/cache: v4.3.0 # github-tags
 actions/upload-artifact: v5 # github-tags
-actions/download-artifact: v6 # github-tags
+actions/download-artifact: v7 # github-tags
 actions/setup-python: v6.1.0 # github-tags
 sbrunner/hooks: 1.6.1 # github-tags
 pre-commit/mirrors-prettier: v3.1.0 # github-tags
