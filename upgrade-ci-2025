@@ -736,8 +736,6 @@ def _update_workflow_venv(task_env: _TaskEnv, yaml: mra.EditYAML) -> None:
 
 
 def _update_main_workflow(task_env: _TaskEnv) -> None:
-    if Path(".github/workflows/codeql.yaml").exists():
-        Path(".github/workflows/codeql.yaml").unlink()
     if not Path(".github/workflows/main.yaml").exists() and Path(".github/workflows/ci.yaml").exists():
         Path(".github/workflows/ci.yaml").rename(Path(".github/workflows/main.yaml"))
     if Path(".github/workflows/main.yaml").exists():
@@ -931,12 +929,6 @@ def _update_main_workflow(task_env: _TaskEnv) -> None:
             #             job["steps"].append(step)
 
 
-def _update_audit_workflow(task_env: _TaskEnv) -> None:
-    del task_env  # unused
-    if Path(".github/workflows/audit.yaml").exists():
-        Path(".github/workflows/audit.yaml").unlink()
-
-
 def _update_clean_workflow(task_env: _TaskEnv) -> None:
     if Path(".github/workflows/clean.yaml").exists():
         with mra.EditYAML(Path(".github/workflows/clean.yaml")) as yaml:
@@ -973,28 +965,39 @@ def _upgrade_deprecated_action(task_env: _TaskEnv) -> None:
 
 
 def _clean_workflow(task_env: _TaskEnv) -> None:
-    if Path(".whitesource").exists():
-        Path(".whitesource").unlink()
-    if Path(".github/changelog-config.yaml").exists():
-        Path(".github/changelog-config.yaml").unlink()
-    if Path(".github/workflows/changelog.yaml").exists():
-        Path(".github/workflows/changelog.yaml").unlink()
-    if Path(".github/run-changelog.mjs").exists():
-        Path(".github/run-changelog.mjs").unlink()
-    if Path(".github/workflows/pr-checks.yaml").exists():
-        Path(".github/workflows/pr-checks.yaml").unlink()
-    if Path(".github/workflows/test_url.yaml").exists():
-        Path(".github/workflows/test_url.yaml").unlink()
-    if Path(".github/workflows/delete-old-workflow-run.yaml").exists():
-        Path(".github/workflows/delete-old-workflow-run.yaml").unlink()
-    if Path(".github/workflows/delete-old-workflows-run.yaml").exists():
-        Path(".github/workflows/delete-old-workflows-run.yaml").unlink()
-    if Path(".github/workflows/backport.yaml").exists():
-        Path(".github/workflows/backport.yaml").unlink()
-    if Path(".github/workflows/clean.yaml").exists():
-        Path(".github/workflows/clean.yaml").unlink()
-    if not task_env.on_stabilization_branches and Path(".pylintrc").exists():
-        Path(".pylintrc").unlink()
+    for file_ in (
+        Path(".whitesource"),
+        Path(".github/run-changelog.mjs"),
+        Path(".github/workflows/dependabot-auto-merge.yaml"),
+        Path(".github/workflows/auto-review.yaml"),
+        Path(".github/workflows/auto-merge.yaml"),
+        Path(".github/workflows/dependency-update-review.yaml"),
+        Path(".github/workflows/dependency-auto-review.yaml"),
+        Path(".github/workflows/changelog-config.yaml"),
+        Path(".github/workflows/changelog.yaml"),
+        Path(".github/workflows/pr-checks.yaml"),
+        Path(".github/workflows/test_url.yaml"),
+        Path(".github/workflows/delete-old-workflow-run.yaml"),
+        Path(".github/workflows/delete-old-workflows-run.yaml"),
+        Path(".github/workflows/backport.yaml"),
+        Path(".github/workflows/clean.yaml"),
+        Path(".github/workflows/audit.yaml"),
+        Path(".github/workflows/codeql.yaml"),
+    ):
+        if file_.exists():
+            file_.unlink()
+    if task_env.on_stabilization_branches:
+        for file_ in (Path(".github/renovate.json5"),):
+            if file_.exists():
+                file_.unlink()
+        for file_ in Path(".github/workflows").glob("audit*.yaml"):
+            file_.unlink()
+        for file_ in Path(".github/workflows").glob("rebuild*.yaml"):
+            file_.unlink()
+    else:
+        for file_ in (Path(".pylintrc"),):
+            if file_.exists():
+                file_.unlink()
 
 
 def _safe_or(elements: list[str], prefix: str = "") -> str:
@@ -1014,30 +1017,11 @@ def _and(elements: list[str], prefix: str = "") -> str:
 
 
 def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
-    for file_ in (
-        Path(".github/workflows/dependabot-auto-merge.yaml"),
-        Path(".github/workflows/auto-review.yaml"),
-        Path(".github/workflows/auto-merge.yaml"),
-        Path(".github/workflows/dependency-update-review.yaml"),
-        Path(".github/workflows/dependency-auto-review.yaml"),
-    ):
-        if file_.exists():
-            if Path(".github/workflows/pull-request-automation.yaml").exists():
-                file_.unlink()
-            else:
-                mra.run(
-                    [
-                        "git",
-                        "mv",
-                        file_,
-                        ".github/workflows/pull-request-automation.yaml",
-                    ],
-                )
     if not Path(".github/workflows/pull-request-automation.yaml").exists():
         with mra.Edit(Path(".github/workflows/pull-request-automation.yaml")) as text:
-            text.data = "\n".join(  # noqa: FLY002
+            text.data = "\n".join(
                 [
-                    "name: Auto reviews updates",
+                    "name: Auto review updates",
                     "",
                     "on:",
                     "  pull_request:",
@@ -1047,12 +1031,15 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
                     "",
                     "jobs:",
                     "  auto-merge:",
-                    "    name: Auto reviews updates",
+                    "    name: Auto review updates",
                     "    runs-on: ubuntu-22.04",
                     "    timeout-minutes: 5",
                     "",
+                    "    permissions:",
+                    "      pull-requests: write",
+                    "",
                     "    steps:",
-                    "      - uses: actions/github-script@v7",
+                    "      - uses: actions/github-script@" + _VERSIONS["actions/github-script"],
                     "        with:",
                     "          script: |-",
                     "            github.rest.pulls.createReview({",
@@ -1066,13 +1053,13 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
             )
     with mra.EditYAML(Path(".github/workflows/pull-request-automation.yaml")) as yaml:
         task_env.config.value("dependencyAutoReviewUsers", ["renovate[bot]"])
-        yaml["name"] = "Auto reviews pull requests from bots"
+        yaml["name"] = "Auto review pull requests from bots"
         yaml["on"] = {
             "pull_request": {"types": ["opened", "reopened"]},
         }
-        yaml["name"] = "Auto reviews, merge and close pull requests"
+        yaml["name"] = "Auto review, merge and close pull requests"
         for job in yaml["jobs"].values():
-            job["name"] = "Auto reviews pull requests from bots"
+            job["name"] = "Auto review pull requests from bots"
 
             job["permissions"] = {
                 #    "contents": "write",
@@ -1084,8 +1071,8 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
 
             print_event = "Print event"
             print_context = "Print context"
-            auto_review_ghci_updates = "Auto reviews GHCI updates"
-            auto_review_renovate_updates = "Auto reviews Renovate updates"
+            auto_review_ghci_updates = "Auto review GHCI updates"
+            auto_review_renovate_updates = "Auto review Renovate updates"
             auto_review_and_merge_dpkg_updates = "Auto review and merge dpkg updates"
             auto_review_and_merge_snyk_auto_fix = "Auto review and merge snyk auto fix"
             step_names = [
@@ -1126,7 +1113,7 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
                     }
                 if step["name"] == print_context:
                     if not step.get("uses", "").startswith("actions/github-script@"):
-                        step["uses"] = "actions/github-script@v7"
+                        step["uses"] = "actions/github-script@" + _VERSIONS["actions/github-script"]
                     step["with"] = {
                         "script": ruamel.yaml.scalarstring.LiteralScalarString(
                             "console.log(context);",
@@ -1138,7 +1125,7 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
                         del step["env"]
                 if step["name"] == auto_review_ghci_updates:
                     if not step.get("uses", "").startswith("actions/github-script@"):
-                        step["uses"] = "actions/github-script@v7"
+                        step["uses"] = "actions/github-script@" + _VERSIONS["actions/github-script"]
                     step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
                         _and(
                             [
@@ -1170,7 +1157,7 @@ def _update_pull_request_automation_workflow(task_env: _TaskEnv) -> None:
                     }
                 if step["name"] == auto_review_renovate_updates:
                     if not step.get("uses", "").startswith("actions/github-script@"):
-                        step["uses"] = "actions/github-script@v7"
+                        step["uses"] = "actions/github-script@" + _VERSIONS["actions/github-script"]
                     step["if"] = ruamel.yaml.scalarstring.LiteralScalarString(
                         "github.event.pull_request.user.login == 'renovate[bot]'",
                     )
@@ -1510,13 +1497,6 @@ def _update_prospector_config(task_env: _TaskEnv) -> None:
                         del prospector_config[tag]
 
 
-# def _update_python_version(task_env: TaskEnv) -> None:
-#    if task_env.min_python_version:
-#        if os.exists("jsonschema-gentypes.yaml"):
-#            with mra.Edit(Path("jsonschema-gentypes.yaml") as jsonschema_gentypes:
-#                jsonschema_gentypes['python_version'] = task_env.min_python_version
-
-
 def _update_renovate_config(task_env: _TaskEnv) -> None:
     if not Path(".github/renovate.json5").exists():
         return
@@ -1564,6 +1544,11 @@ def _update_renovate_config(task_env: _TaskEnv) -> None:
         if "baseBranches" in renovate_config:
             renovate_config.data.children = {
                 key if key != "baseBranches" else "baseBranchPatterns": value
+                for key, value in renovate_config.items()
+            }
+        if "stabilityDays" in renovate_config:
+            renovate_config.data.children = {
+                key if key != "stabilityDays" else "minimumReleaseAge": value
                 for key, value in renovate_config.items()
             }
         for element in ("html", "helm-values", "kubernetes"):
@@ -2246,25 +2231,14 @@ def _do() -> None:
     ):
         if task_env.config.enabled(name, default=True):
             task(task_env)
-    if task_env.on_stabilization_branches:
-        for file_ in (Path(".github/renovate.json5"),):
-            if file_.exists():
-                file_.unlink()
-        for file_ in Path(".github/workflows").glob("audit*.yaml"):
-            file_.unlink()
-        for file_ in Path(".github/workflows").glob("rebuild*.yaml"):
-            file_.unlink()
-
-    else:
+    if not task_env.on_stabilization_branches:
         for name, task in (
             # ("upgrade-ubuntu", _upgrade_ubuntu),
             ("create-labels", _create_labels),
             ("update-clean-workflow", _update_clean_workflow),
             ("tag-publish-config", _tag_publish_config),
-            ("update-audit-workflow", _update_audit_workflow),
             ("update-pyproject-toml", _update_pyproject_toml),
             ("update-prospector-config", _update_prospector_config),
-            # ("update-python-version", _update_python_version),
             ("update-renovate-config", _update_renovate_config),
             ("update-config", _update_config),
             ("update-pre-commit-config", _update_pre_commit_config),
