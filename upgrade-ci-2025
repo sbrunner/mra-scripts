@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import multi_repo_automation as mra
 import ruamel.yaml.comments
@@ -36,7 +36,7 @@ with (Path(__file__).parent / "versions.yaml").open(encoding="utf-8") as f:
     _VERSIONS = py_yaml.load(f, Loader=py_yaml.SafeLoader)
 
 
-def gopass(key: str, default: Optional[str] = None) -> Optional[str]:
+def gopass(key: str, default: str | None = None) -> str | None:
     """
     Get a value from gopass.
 
