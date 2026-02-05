@@ -10,7 +10,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, AnyStr, NamedTuple, Optional, Union
+from typing import Any, AnyStr, NamedTuple
 
 import c2cciutils.lib.docker
 import multi_repo_automation as mra
@@ -78,7 +78,7 @@ class TaskEnv(NamedTuple):
 def _order_keys(
     data: dict[str, Any],
     first_keys: list[str],
-    last_keys: Optional[list[str]] = None,
+    last_keys: list[str] | None = None,
 ) -> ruamel.yaml.comments.CommentedMap:
     if last_keys is None:
         last_keys = []
@@ -99,9 +99,9 @@ def _order_keys(
 
 
 def _order_sub_keys(
-    data: Union[dict[str, dict[str, Any]], list[dict[str, AnyStr]]],
+    data: dict[str, dict[str, Any]] | list[dict[str, AnyStr]],
     first_keys: list[str],
-    last_keys: Optional[list[str]] = None,
+    last_keys: list[str] | None = None,
 ) -> None:
     items = data.items() if isinstance(data, dict) else enumerate(data)
     for key, value in items:
