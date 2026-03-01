@@ -21,15 +21,15 @@ version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-multi-repo-automation = "1.7.0"
+multi-repo-automation = "1.8.0"
 ruamel-yaml = "0.19.1"
-githubkit = "0.14.3"
+githubkit = "0.14.5"
 
 [tool.poetry.group.dev.dependencies]
 # pylint = "2.15.6"
 prospector = { version = "1.18.0", extras = ["with_bandit", "with_mypy", "with_pyroma", "with_ruff"] }
-prospector-profile-utils = "1.26.5"
-prospector-profile-duplicated = "1.11.0"
+prospector-profile-utils = "1.27.0"
+prospector-profile-duplicated = "1.12.0"
 
 [tool.poetry-dynamic-versioning]
 enable = true
