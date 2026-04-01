@@ -394,14 +394,14 @@ flake8 = "*"
 
 [[package]]
 name = "githubkit"
-version = "0.14.5"
+version = "0.15.1"
 description = "GitHub SDK for Python"
 optional = false
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
 files = [
-    {file = "githubkit-0.14.5-py3-none-any.whl", hash = "sha256:a653261c59ca26dbb5d03a6856b10722eb6d79ac05157231ed4d6bca38b9ae8f"},
-    {file = "githubkit-0.14.5.tar.gz", hash = "sha256:0238d0922c7a77654a40593729009b2274e1d7a56c7c321c4f84ee1b0017cc5a"},
+    {file = "githubkit-0.15.1-py3-none-any.whl", hash = "sha256:17616c8ba3764e568727883db190512c1e64eb1b147b190a29a6cb46b1581409"},
+    {file = "githubkit-0.15.1.tar.gz", hash = "sha256:e436494321bbd7abc27ad4fd3b8d82a94602bce0f9816ad01b58952ef299544c"},
 ]
 
 [package.dependencies]
@@ -835,14 +835,14 @@ files = [
 
 [[package]]
 name = "multi-repo-automation"
-version = "1.8.0"
+version = "1.8.1"
 description = "Library for automation updates on multiple repositories."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "multi_repo_automation-1.8.0-py3-none-any.whl", hash = "sha256:c7d4b2100a74c9f213fc3e9e1cff6862f755fc5cb7a9a3bf7ab92c4c8588bbb6"},
-    {file = "multi_repo_automation-1.8.0.tar.gz", hash = "sha256:23d95a5a68005471da3d419582fc74e23dfbb68f1d56e8fb1cfe895114cb99fb"},
+    {file = "multi_repo_automation-1.8.1-py3-none-any.whl", hash = "sha256:38cb36bee291a5486278621002c3e1c5c6779a7d6f0addc62c44056629f58318"},
+    {file = "multi_repo_automation-1.8.1.tar.gz", hash = "sha256:d86a284bee562a44d7bdc3eec639423c7f6ec291dfa4c931d18333e482f62689"},
 ]
 
 [package.dependencies]
@@ -1836,4 +1836,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "c538f0a7581b7afd5b374db2dc77adbddf84aa9f5a3509c831d5471ced5a5766"
+content-hash = "2de6f926926646449384cd9424a4b366b98c8faabd0312e88ecc4b2b8bc6a750"

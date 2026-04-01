@@ -71,7 +71,7 @@ class _Config:
         self._values = {}
         self._enabled = []
         self._disabled = []
-        self.repo = mra.get_repo_config()
+        self.repo = mra.tools.get_repo_config()
         self.arguments = mra.get_arguments()
 
         if Path(".github/ci-upgrade.yaml").exists():
@@ -346,7 +346,7 @@ class _TaskEnv:
 
 
 def _create_labels(task_env: _TaskEnv) -> None:
-    mra.gh(
+    mra.tools.gh(
         "label",
         "create",
         "--force",
@@ -355,7 +355,7 @@ def _create_labels(task_env: _TaskEnv) -> None:
         "--description=Update the dependencies",
     )
     if task_env.config.enabled("pullRequestWelcome", default=False):
-        mra.gh(
+        mra.tools.gh(
             "label",
             "create",
             "--force",
