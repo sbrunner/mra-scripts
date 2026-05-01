@@ -20,7 +20,7 @@ actions/cache: v5.0.5 # github-tags
 actions/upload-artifact: v7.0.1 # github-tags
 actions/download-artifact: v8.0.1 # github-tags
 actions/setup-python: v6.2.0 # github-tags
-actions/github-script: v8 # github-tags
+actions/github-script: v9 # github-tags
 sbrunner/hooks: 1.7.0 # github-tags
 pre-commit/mirrors-prettier: v3.1.0 # github-tags
 prettier: 3.8.3 # npm
