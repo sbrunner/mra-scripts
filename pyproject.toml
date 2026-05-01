@@ -80,5 +80,5 @@ repository = "https://github.com/sbrunner/mra-scripts"
 "Bug Tracker" = "https://github.com/sbrunner/mra-scripts/issues"
 
 [build-system]
-requires = ["poetry-core==2.3.1"]
+requires = ["poetry-core==2.3.2"]
 build-backend = "poetry.core.masonry.api"
