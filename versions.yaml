@@ -1,5 +1,5 @@
 python: '3.14' # python-version
-camptocamp/gs-renovate-config-preset: 1.9.3 # github-tags
+camptocamp/gs-renovate-config-preset: 1.9.4 # github-tags
 renovatebot/pre-commit-hooks: 43.150.0 # github-tags
 mheap/json-schema-spell-checker: v2.3.0 # github-tags
 astral-sh/ruff-pre-commit: v0.15.14 # github-tags
