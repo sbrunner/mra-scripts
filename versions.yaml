@@ -16,7 +16,7 @@ poetry-plugin-tweak-dependencies-version: 1.5.6 # pypi
 poetry-plugin-drop-python-upper-constraint: 1.0.1 # pypi
 poetry-plugin-export: 1.10.0 # pypi
 sbrunner/jsonschema-validator: 1.0.0 # github-tags
-actions/cache: v5.0.5 # github-tags
+actions/cache: v6 # github-tags
 actions/upload-artifact: v7.0.1 # github-tags
 actions/download-artifact: v8.0.1 # github-tags
 actions/setup-python: v6.2.0 # github-tags
