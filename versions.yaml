@@ -6,10 +6,10 @@ astral-sh/ruff-pre-commit: v0.16.4 # github-tags
 prospector-dev/prospector: v1.19.1 # github-tags
 prospector-profile-duplicated: 1.12.0 # pypi
 prospector-profile-utils: 1.27.0 # pypi
-pylint: 4.0.6 # pypi
-ruff: 0.16.0 # pypi
+pylint: 4.0.7 # pypi
+ruff: 0.16.4 # pypi
 sbrunner/python-versions-hook: 1.4.1 # github-tags
-tag-publish: 1.2.2 # pypi
+tag-publish: 1.2.5 # pypi
 sbrunner/jsonschema-gentypes: 2.13.0 # github-tags
 poetry-dynamic-versioning: 1.10.0 # pypi
 poetry-plugin-tweak-dependencies-version: 1.5.6 # pypi
