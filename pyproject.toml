@@ -23,7 +23,7 @@ version = "0.0.0"
 python = ">=3.10,<4.0"
 multi-repo-automation = "1.9.1"
 ruamel-yaml = "0.19.1"
-githubkit = "0.16.0"
+githubkit = "0.16.1"
 
 [tool.poetry.group.dev.dependencies]
 # pylint = "2.15.6"
