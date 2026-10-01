@@ -6,8 +6,8 @@ astral-sh/ruff-pre-commit: v0.16.4 # github-tags
 prospector-dev/prospector: v1.19.1 # github-tags
 prospector-profile-duplicated: 1.12.0 # pypi
 prospector-profile-utils: 1.27.0 # pypi
-pylint: 4.0.7 # pypi
-ruff: 0.16.4 # pypi
+pylint: 4.0.9 # pypi
+ruff: 0.16.8 # pypi
 sbrunner/python-versions-hook: 1.4.1 # github-tags
 tag-publish: 1.2.6 # pypi
 sbrunner/jsonschema-gentypes: 2.13.0 # github-tags
@@ -26,4 +26,4 @@ pre-commit/mirrors-prettier: v3.1.0 # github-tags
 prettier: 3.9.6 # npm
 prettier-plugin-sh: 0.19.0 # npm
 prettier-plugin-toml: 2.0.6 # npm
-poetry: 2.4.1 # pypi
+poetry: 2.5.1 # pypi
