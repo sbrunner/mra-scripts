@@ -25,5 +25,5 @@ sbrunner/hooks: 1.8.0 # github-tags
 pre-commit/mirrors-prettier: v3.1.0 # github-tags
 prettier: 3.9.9 # npm
 prettier-plugin-sh: 0.20.0 # npm
-prettier-plugin-toml: 2.0.6 # npm
+prettier-plugin-toml: 3.0.2 # npm
 poetry: 2.5.1 # pypi
