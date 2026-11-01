@@ -1,4 +1,4 @@
-python: '3.14' # python-version
+python: '3.15' # python-version
 camptocamp/gs-renovate-config-preset: 1.13.1 # github-tags
 renovatebot/pre-commit-hooks: 44.181.5 # github-tags
 mheap/json-schema-spell-checker: v2.3.1 # github-tags
